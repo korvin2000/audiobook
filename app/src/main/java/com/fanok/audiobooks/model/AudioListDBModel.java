@@ -5,9 +5,17 @@ import androidx.annotation.NonNull;
 import com.fanok.audiobooks.interface_pacatge.books.AudioListDBHelperInterfase;
 import com.fanok.audiobooks.interface_pacatge.books.BooksDBAbstract;
 import com.fanok.audiobooks.pojo.AudioListPOJO;
+import com.fanok.audiobooks.room.BooksAudioDao;
 import com.fanok.audiobooks.room.BooksAudioEntity;
+import com.fanok.audiobooks.util.DeletionPlanner;
+import com.fanok.audiobooks.util.DownloadStorageHelper;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelperInterfase {
 
@@ -39,11 +47,93 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
     }
 
     public void removeTrack(@NonNull String urlBook, @NonNull String audioUrl) {
-        if (urlBook.isEmpty() || audioUrl.isEmpty()) return;
-        String cleanUrl = audioUrl;
-        int q = cleanUrl.indexOf('?');
-        if (q >= 0) cleanUrl = cleanUrl.substring(0, q);
-        getDatabase().booksAudioDao().deleteTrack(urlBook, audioUrl, "%" + cleanUrl + "%");
+        getDatabase().booksAudioDao().deleteTrack(urlBook, audioUrl);
+    }
+
+    /** Chapter rows of a book in list order, with their recorded exported copies. */
+    @NonNull
+    public List<BooksAudioEntity> getRows(@NonNull String url) {
+        return getDatabase().booksAudioDao().getByBookUrl(url);
+    }
+
+    /** Records the exported copy of every chapter whose remote URL has the given Media3 download id. */
+    public void setLocalUri(@NonNull String urlBook, @NonNull String downloadId, @NonNull String localUri) {
+        getDatabase().runInTransaction(() -> {
+            Set<String> audioUrls = new LinkedHashSet<>();
+            for (BooksAudioEntity row : getRows(urlBook)) {
+                if (DeletionPlanner.isRemote(row.urlAudio) && downloadId.equals(DownloadStorageHelper.downloadIdOf(row.urlAudio))) {
+                    audioUrls.add(row.urlAudio);
+                }
+            }
+            for (String audioUrl : audioUrls) {
+                getDatabase().booksAudioDao().updateLocalUri(urlBook, audioUrl, localUri);
+            }
+        });
+    }
+
+    /**
+     * Upserts the parsed chapter list of an online book in one transaction. Existing rows are matched by download id,
+     * then by position, and keep local_uri and their time columns; rows no longer listed are deleted only when they
+     * record no exported copy.
+     */
+    @Override
+    public void syncChapters(@NonNull String urlBook, @NonNull List<AudioListPOJO> chapters) {
+        BooksAudioDao dao = getDatabase().booksAudioDao();
+        getDatabase().runInTransaction(() -> {
+            List<BooksAudioEntity> old = dao.getByBookUrl(urlBook);
+            boolean[] used = new boolean[old.size()];
+            Map<String, ArrayDeque<Integer>> byId = new HashMap<>();
+            for (int j = 0; j < old.size(); j++) {
+                String url = old.get(j).urlAudio;
+                if (DeletionPlanner.isRemote(url)) {
+                    String id = DownloadStorageHelper.downloadIdOf(url);
+                    if (!byId.containsKey(id)) byId.put(id, new ArrayDeque<>());
+                    byId.get(id).add(j);
+                }
+            }
+            BooksAudioEntity[] match = new BooksAudioEntity[chapters.size()];
+            for (int i = 0; i < chapters.size(); i++) {
+                String url = chapters.get(i).getAudioUrl();
+                ArrayDeque<Integer> same = DeletionPlanner.isRemote(url) ? byId.get(DownloadStorageHelper.downloadIdOf(url)) : null;
+                if (same != null && !same.isEmpty()) {
+                    int j = same.poll();
+                    match[i] = old.get(j);
+                    used[j] = true;
+                }
+            }
+            for (int i = 0; i < chapters.size(); i++) {
+                if (match[i] == null && i < old.size() && !used[i]) {
+                    match[i] = old.get(i);
+                    used[i] = true;
+                }
+            }
+            for (int i = 0; i < chapters.size(); i++) {
+                AudioListPOJO chapter = chapters.get(i);
+                BooksAudioEntity row = match[i];
+                if (row == null) {
+                    row = new BooksAudioEntity();
+                    row.urlBook = urlBook;
+                    row.time = chapter.getTime();
+                    row.timeStart = chapter.getTimeStart();
+                    row.timeEnd = chapter.getTimeEnd();
+                } else if (row.localUri == null && row.urlAudio != null && !row.urlAudio.isEmpty()
+                        && !DeletionPlanner.isRemote(row.urlAudio)) {
+                    // Before local_uri existed the exporter overwrote url_audio with its copy: record it as owned.
+                    row.localUri = row.urlAudio;
+                }
+                row.booksName = chapter.getBookName();
+                row.nameAudio = chapter.getAudioName();
+                row.urlAudio = chapter.getAudioUrl();
+                row.ordinal = i;
+                dao.insert(row);
+            }
+            for (int j = 0; j < old.size(); j++) {
+                BooksAudioEntity row = old.get(j);
+                if (!used[j] && row.localUri == null && DeletionPlanner.isRemote(row.urlAudio)) {
+                    dao.deleteById(row.id);
+                }
+            }
+        });
     }
 
     @Override
@@ -69,9 +159,18 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
         return list;
     }
 
+    /** The chapter whose url_audio equals {@code audioUrl}, or else whose remote URL has it as Media3 download id. */
     @Override
     public AudioListPOJO get(@NonNull String url, @NonNull String audioUrl) {
         BooksAudioEntity entity = getDatabase().booksAudioDao().getByUrlAndAudioUrl(url, audioUrl);
+        if (entity == null) {
+            for (BooksAudioEntity row : getRows(url)) {
+                if (DeletionPlanner.isRemote(row.urlAudio) && audioUrl.equals(DownloadStorageHelper.downloadIdOf(row.urlAudio))) {
+                    entity = row;
+                    break;
+                }
+            }
+        }
         AudioListPOJO audio = new AudioListPOJO();
         if (entity != null) {
             audio.setBookUrl(entity.urlBook);

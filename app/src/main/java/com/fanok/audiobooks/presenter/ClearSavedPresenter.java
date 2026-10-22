@@ -3,7 +3,6 @@ package com.fanok.audiobooks.presenter;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
-import android.util.Log;
 
 import androidx.media3.common.C;
 import androidx.media3.common.util.UnstableApi;
@@ -104,31 +103,7 @@ public class ClearSavedPresenter extends MvpPresenter<ClearSavedView> {
         getViewState().showData(downloads);
 
         if (mContext != null && id != null) {
-            new Thread(() -> {
-                try {
-                    com.fanok.audiobooks.model.BooksDBModel dbModel = new com.fanok.audiobooks.model.BooksDBModel(mContext);
-                    com.fanok.audiobooks.pojo.BookPOJO book = dbModel.getSomewhere(id);
-
-                    // 1. FIRST delete physical files on disk while track URIs exist in AudioListDBModel
-                    com.fanok.audiobooks.util.DownloadStorageHelper.deleteBookFiles(mContext, id, book);
-
-                    // 2. THEN delete entries from Room DB
-                    dbModel.removeSavedByUrl(id);
-                    if (book != null) dbModel.removeSaved(book);
-                    dbModel.closeDB();
-
-                    com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(mContext);
-                    audioListDBModel.remove(id);
-                    audioListDBModel.closeDB();
-
-                    Intent intent = new Intent(mContext, DownloadActionReceiver.class);
-                    intent.setAction("CANCEL");
-                    intent.putExtra("id", id);
-                    mContext.sendBroadcast(intent);
-                } catch (Exception e) {
-                    Log.e("ClearSavedPresenter", "Error removing download item in background", e);
-                }
-            }).start();
+            com.fanok.audiobooks.util.DownloadStorageHelper.removeBooks(mContext, java.util.Collections.singletonList(id));
         }
     }
 
@@ -139,35 +114,11 @@ public class ClearSavedPresenter extends MvpPresenter<ClearSavedView> {
         getViewState().showData(downloads);
 
         if (mContext != null) {
-            new Thread(() -> {
-                try {
-                    com.fanok.audiobooks.model.BooksDBModel dbModel = new com.fanok.audiobooks.model.BooksDBModel(mContext);
-                    com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(mContext);
-                    for (DownloadItem downloadItem : arrayList) {
-                        String id = downloadItem.getFileName();
-                        if (id != null) {
-                            com.fanok.audiobooks.pojo.BookPOJO book = dbModel.getSomewhere(id);
-
-                            // 1. FIRST delete physical files on disk
-                            com.fanok.audiobooks.util.DownloadStorageHelper.deleteBookFiles(mContext, id, book);
-
-                            // 2. THEN delete entries from Room DB
-                            dbModel.removeSavedByUrl(id);
-                            if (book != null) dbModel.removeSaved(book);
-                            audioListDBModel.remove(id);
-
-                            Intent intent = new Intent(mContext, DownloadActionReceiver.class);
-                            intent.setAction("CANCEL");
-                            intent.putExtra("id", id);
-                            mContext.sendBroadcast(intent);
-                        }
-                    }
-                    dbModel.closeDB();
-                    audioListDBModel.closeDB();
-                } catch (Exception e) {
-                    Log.e("ClearSavedPresenter", "Error removing batch downloads in background", e);
-                }
-            }).start();
+            ArrayList<String> ids = new ArrayList<>();
+            for (DownloadItem downloadItem : arrayList) {
+                if (downloadItem.getFileName() != null) ids.add(downloadItem.getFileName());
+            }
+            com.fanok.audiobooks.util.DownloadStorageHelper.removeBooks(mContext, ids);
         }
     }
 

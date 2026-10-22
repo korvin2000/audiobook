@@ -360,9 +360,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
             }
 
             if (!error && !mIsOfflineFallback) {
-                if (mAudioListDBModel.isset(mBookPOJO.getUrl())) {
-                    mAudioListDBModel.remove(mBookPOJO.getUrl());
-                }
+                ArrayList<AudioListPOJO> chapters = new ArrayList<>();
                 for (int i = 0; i < mAudioPOJO.size(); i++) {
                     AudioListPOJO audioListPOJO = new AudioListPOJO();
                     audioListPOJO.setBookUrl(mBookPOJO.getUrl());
@@ -372,8 +370,9 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                     audioListPOJO.setTime(mAudioPOJO.get(i).getTime());
                     audioListPOJO.setTimeStart(mAudioPOJO.get(i).getTimeStart());
                     audioListPOJO.setTimeEnd(mAudioPOJO.get(i).getTimeFinish());
-                    mAudioListDBModel.add(audioListPOJO);
+                    chapters.add(audioListPOJO);
                 }
+                mAudioListDBModel.syncChapters(mBookPOJO.getUrl(), chapters);
             }
 
             boolean b = pref.getBoolean("reproductionPref", true);
@@ -559,14 +558,8 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
     @UnstableApi
     @Override
     public void dowland(HashSet<String> data) {
-        for (String url : data) {
-            Uri uri = Uri.parse(url);
-            String id = new Uri.Builder()
-                    .scheme(uri.getScheme())
-                    .authority(uri.getAuthority())
-                    .path(uri.getPath())
-                    .build()
-                    .toString();
+        for (String url : new ArrayList<>(data)) {
+            String id = com.fanok.audiobooks.util.DownloadStorageHelper.downloadIdOf(url);
             DownloadRequest downloadRequest = new DownloadRequest.Builder(id, DownloadUtil.buildAnnotatedUri(url, mBookPOJO.getUrl()))
                     .setData(new Gson().toJson(mBookPOJO).getBytes())
                     //.setCustomCacheKey(url)
@@ -577,32 +570,18 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
     @UnstableApi
     @Override
     public void delete(HashSet<String> data) {
-        if (data == null || data.isEmpty()) return;
+        if (data == null || data.isEmpty() || mBookPOJO == null || mBookPOJO.getUrl() == null) return;
 
-        HashSet<String> chapterNames = new HashSet<>();
-        if (mAudioPOJO != null) {
-            for (AudioPOJO pojo : mAudioPOJO) {
-                if (pojo != null && pojo.getUrl() != null && data.contains(pojo.getUrl())) {
-                    if (pojo.getName() != null && !pojo.getName().isEmpty()) {
-                        chapterNames.add(pojo.getName());
+        final boolean isImported = mBookPOJO.getUrl().contains("/imported/");
+        com.fanok.audiobooks.util.DownloadStorageHelper.deleteChapters(mContext, mBookPOJO.getUrl(), new HashSet<>(data),
+                (deleted, total) -> {
+                    getViewState().showToast(mContext.getString(R.string.delete_result, deleted, total));
+                    if (isImported) {
+                        getAudio();
+                    } else {
+                        getViewState().updateAdapter();
                     }
-                }
-            }
-        }
-
-        boolean isImported = mBookPOJO != null && mBookPOJO.getUrl() != null && mBookPOJO.getUrl().contains("/imported/");
-
-        new Thread(() -> {
-            com.fanok.audiobooks.util.DownloadStorageHelper.deleteChapterFiles(mContext, mBookPOJO.getUrl(), mBookPOJO, data, chapterNames);
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-                if (isImported) {
-                    getAudio();
-                } else {
-                    getViewState().updateAdapter();
-                }
-            });
-        }).start();
-        getViewState().showToast(R.string.delete_complite);
+                });
     }
 
     @Override
@@ -718,59 +697,36 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         boolean foundSaved = false;
         if (mBookPOJO != null && mBookPOJO.getUrl() != null) {
             try {
-                ArrayList<AudioListPOJO> savedList = mAudioListDBModel.get(mBookPOJO.getUrl());
-                if (savedList != null && !savedList.isEmpty()) {
+                java.util.List<com.fanok.audiobooks.room.BooksAudioEntity> savedList = mAudioListDBModel.getRows(mBookPOJO.getUrl());
+                if (!savedList.isEmpty()) {
                     DownloadIndex downloadIndex = null;
                     try {
                         downloadIndex = getDownloadManager().getDownloadIndex();
                     } catch (Exception ignored) {}
 
-                    for (AudioListPOJO pojo : savedList) {
-                        if (pojo == null) continue;
-                        String audioUrl = pojo.getAudioUrl();
-                        String resolvedUrl = null;
-
-                        if (audioUrl != null && (audioUrl.startsWith("content://") || audioUrl.startsWith("file://"))) {
-                            resolvedUrl = audioUrl;
-                        } else if (audioUrl != null && audioUrl.startsWith("/")) {
-                            java.io.File f = new java.io.File(audioUrl);
-                            if (f.exists()) resolvedUrl = audioUrl;
-                        } else if (audioUrl != null && !audioUrl.isEmpty() && downloadIndex != null) {
+                    for (com.fanok.audiobooks.room.BooksAudioEntity row : savedList) {
+                        // Only the chapter's own row identifies its copy: the recorded export, its own local
+                        // file, or the completed Media3 download of its remote URL.
+                        String resolvedUrl = com.fanok.audiobooks.util.DownloadStorageHelper.localCopyOf(mContext, row);
+                        if (resolvedUrl == null && downloadIndex != null
+                                && com.fanok.audiobooks.util.DeletionPlanner.isRemote(row.urlAudio)) {
                             try {
-                                Download download = downloadIndex.getDownload(pojo.getCleanAudioUrl());
-                                if (download == null) {
-                                    download = downloadIndex.getDownload(audioUrl);
-                                }
+                                Download download = downloadIndex.getDownload(
+                                        com.fanok.audiobooks.util.DownloadStorageHelper.downloadIdOf(row.urlAudio));
                                 if (download != null && download.state == Download.STATE_COMPLETED) {
-                                    resolvedUrl = audioUrl;
+                                    resolvedUrl = row.urlAudio;
                                 }
                             } catch (IOException ignored) {}
                         }
 
-                        if (resolvedUrl == null && pojo.getAudioName() != null && !pojo.getAudioName().isEmpty()) {
-                            java.io.File bookDir = com.fanok.audiobooks.util.DownloadStorageHelper.getBookDownloadDir(mContext, mBookPOJO.getUrl(), mBookPOJO.getName(), mBookPOJO.getArtist(), mBookPOJO.getAutor());
-                            if (bookDir != null && bookDir.exists()) {
-                                java.io.File found = findExportedFileByName(bookDir, pojo.getAudioName());
-                                if (found != null) resolvedUrl = found.getAbsolutePath();
-                            }
-                            if (resolvedUrl == null) {
-                                String dlPath = com.fanok.audiobooks.util.DownloadStorageHelper.getDownloadPath(mContext);
-                                java.io.File baseDir = new java.io.File(dlPath);
-                                if (baseDir.exists()) {
-                                    java.io.File found = findExportedFileByName(baseDir, pojo.getAudioName());
-                                    if (found != null) resolvedUrl = found.getAbsolutePath();
-                                }
-                            }
-                        }
-
                         if (resolvedUrl != null) {
                             AudioPOJO audioPOJO = new AudioPOJO();
-                            audioPOJO.setName(pojo.getAudioName());
-                            audioPOJO.setBookName(pojo.getBookName() != null ? pojo.getBookName() : "");
+                            audioPOJO.setName(row.nameAudio);
+                            audioPOJO.setBookName(row.booksName);
                             audioPOJO.setUrl(resolvedUrl);
-                            audioPOJO.setTime(pojo.getTime());
-                            audioPOJO.setTimeStart(pojo.getTimeStart());
-                            audioPOJO.setTimeFinish(pojo.getTimeEnd());
+                            audioPOJO.setTime(row.time);
+                            audioPOJO.setTimeStart(row.timeStart);
+                            audioPOJO.setTimeFinish(row.timeEnd);
                             localAudio.add(audioPOJO);
                         }
                     }
@@ -855,36 +811,5 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
             Intent broadcastIntent = new Intent(Broadcast_PLAY_NEW_AUDIO);
             getViewState().broadcastSend(broadcastIntent);
         }
-    }
-
-    /**
-     * Recursively searches downloadDir for an audio file matching trackName (without extension).
-     */
-    private java.io.File findExportedFileByName(java.io.File dir, String trackName) {
-        if (dir == null || !dir.exists() || !dir.isDirectory()) return null;
-        if (dir.getName().startsWith(".")) return null;
-        String normalized = trackName.toLowerCase().replaceAll("[^a-z0-9а-яё]", "");
-        java.io.File[] files = dir.listFiles();
-        if (files == null) return null;
-        for (java.io.File f : files) {
-            if (f.isFile()) {
-                String fname = f.getName().toLowerCase();
-                int dot = fname.lastIndexOf('.');
-                String ext = dot > 0 ? fname.substring(dot) : "";
-                String nameNoExt = dot > 0 ? fname.substring(0, dot) : fname;
-                String normFile = nameNoExt.replaceAll("[^a-z0-9а-яё]", "");
-                boolean isAudio = ext.equals(".mp3") || ext.equals(".m4a") || ext.equals(".m4b")
-                        || ext.equals(".mp4") || ext.equals(".aac") || ext.equals(".ogg")
-                        || ext.equals(".flac") || ext.equals(".wav") || ext.equals(".ts");
-                if (isAudio && !normalized.isEmpty() && normFile.equals(normalized)) return f;
-            }
-        }
-        for (java.io.File f : files) {
-            if (f.isDirectory()) {
-                java.io.File result = findExportedFileByName(f, trackName);
-                if (result != null) return result;
-            }
-        }
-        return null;
     }
 }

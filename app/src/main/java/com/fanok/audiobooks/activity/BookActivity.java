@@ -645,7 +645,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
             }
         });
 
-        mDownland.setOnClickListener(view -> mPresenter.dowland(mAudioAdapter.getSelectedItems()));
+        mDownland.setOnClickListener(view -> mPresenter.dowland(new java.util.HashSet<>(mAudioAdapter.getSelectedItems())));
 
         mDelete.setOnClickListener(view -> {
             if (mAudioAdapter != null && mAudioAdapter.getSelectedItemsSize() > 0) {
@@ -653,7 +653,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
                         .setTitle("Удаление загрузок")
                         .setMessage("Вы уверены, что хотите удалить выбранные файлы (" + mAudioAdapter.getSelectedItemsSize() + ")?")
                         .setPositiveButton("ОК", (dialog, which) -> {
-                            mPresenter.delete(mAudioAdapter.getSelectedItems());
+                            mPresenter.delete(new java.util.HashSet<>(mAudioAdapter.getSelectedItems()));
                             mAudioAdapter.clearSelected();
                         })
                         .setNegativeButton("Отмена", null)

@@ -32,4 +32,12 @@ public class BooksAudioEntity {
 
     @ColumnInfo(name = "time_end", defaultValue = "-1")
     public int timeEnd;
+
+    /** Exact URI (content:// or file://) of the exported copy this app wrote; null when not exported. */
+    @ColumnInfo(name = "local_uri")
+    public String localUri;
+
+    /** Position of the chapter in the book's list as last parsed; -1 for rows written before this column existed. */
+    @ColumnInfo(name = "ordinal", defaultValue = "-1")
+    public int ordinal = -1;
 }
