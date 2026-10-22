@@ -9,6 +9,8 @@ import static org.junit.Assert.fail;
 import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.net.SiteHttp;
 import com.fanok.audiobooks.pojo.AudioPOJO;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -294,6 +296,142 @@ public class AudioModelTest {
         audio.setUrl("https://cdn.example.org/1.mp3");
         audio.setUrl("  ");
         assertEquals("", audio.getUrl());
+    }
+
+    @Test
+    public void aknigaClipsAreClosedAndMonotonic() throws IOException {
+        // the middle item has no duration and nothing after it starts explicitly: no [10,-1] clip
+        List<AudioPOJO> chapters = akniga("[{\"duration\":10},{\"title\":\"missing\"},{\"duration\":5}]");
+        assertEquals(2, chapters.size());
+        assertClip(chapters.get(0), 0, 10);
+        assertClip(chapters.get(1), 10, 15);
+        // a missing duration ends at the next explicit start; a backwards start is clamped
+        chapters = akniga("[{\"duration\":10},{\"title\":\"m\"},{\"time_from_start\":30,\"duration\":5},"
+                + "{\"time_from_start\":0,\"duration\":5},{\"title\":\"last\"}]");
+        assertEquals(5, chapters.size());
+        assertClip(chapters.get(0), 0, 10);
+        assertClip(chapters.get(1), 10, 30);
+        assertClip(chapters.get(2), 30, 35);
+        assertClip(chapters.get(3), 35, 40);
+        assertClip(chapters.get(4), 40, -1); // only the last chapter is open-ended
+    }
+
+    @Test
+    public void commentedOutPlayerIsSkipped() {
+        Document doc = Jsoup.parse("<script>/* new BookPlayer(1,[{\"title\":\"old\",\"url\":\"https://cdn.example.org/old.mp3\"}]); */\n"
+                + "// new BookPlayer(1,[{\"title\":\"older\",\"url\":\"https://cdn.example.org/older.mp3\"}]);\n"
+                + "var p = new BookPlayer(2, [{\"title\":\"new\",\"url\":\"https://cdn.example.org/new.mp3\"}]);</script>",
+                KNIGAVUHE);
+        List<AudioPOJO> chapters = AudioModel.parseKnigavuhe(doc, KNIGAVUHE);
+        assertEquals(1, chapters.size());
+        assertEquals("new", chapters.get(0).getName());
+    }
+
+    @Test
+    public void bazaKnigRequestedVoiceWithoutItsTabIsAnError() {
+        Document doc = Jsoup.parse("<h1>Книга</h1><div id=\"content-tab1\"><script>new Playerjs({id:\"player\","
+                + "file:[{\"title\":\"a\",\"file\":\"https://cdn.example.org/1.mp3\"}]});</script></div>", BAZA_KNIG);
+        assertEquals(1, AudioModel.parseBazaKnig(doc, BAZA_KNIG).size());
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> AudioModel.parseBazaKnig(doc, BAZA_KNIG + "?sorce=3"));
+        assertTrue(e.getMessage(), e.getMessage().contains("content-tab3"));
+    }
+
+    @Test
+    public void izibukTrackWithoutFileIsSkipped() {
+        String tracks = "[2,\"B\",20,0,null],[3,\"C\",30,0,\"\"]";
+        Document doc = izibuk("[1,\"A\",10,0,\"a.mp3\"]," + tracks);
+        List<AudioPOJO> chapters = AudioModel.parseIzibuk(doc, IZIBUK);
+        assertEquals(1, chapters.size());
+        assertEquals("https://cdn.example.org/audio/a.mp3?md5=a", chapters.get(0).getUrl());
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> AudioModel.parseIzibuk(izibuk(tracks), IZIBUK));
+        assertTrue(e.getMessage(), e.getMessage().contains("2 skipped"));
+    }
+
+    @Test
+    public void archiveOrgFileWithoutNameIsSkipped() {
+        String metadata = "{\"metadata\":{\"identifier\":\"book-1\"},\"files\":["
+                + "{\"format\":\"VBR MP3\",\"source\":\"original\"},"
+                + "{\"name\":\"01.mp3\",\"format\":\"VBR MP3\",\"source\":\"original\"}]}";
+        List<AudioPOJO> chapters = AudioModel.parseArchiveOrgMetadata(metadata, "Книга");
+        assertEquals(1, chapters.size());
+        assertEquals("https://archive.org/download/book-1/01.mp3", chapters.get(0).getUrl());
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> AudioModel.parseArchiveOrgMetadata(
+                "{\"metadata\":{\"identifier\":\"b\"},\"files\":[{\"format\":\"VBR MP3\"}]}", "Книга"));
+        assertTrue(e.getMessage(), e.getMessage().contains("1 skipped"));
+    }
+
+    @Test
+    public void archiveOrgChoosesOneMp3PerRecording() {
+        String metadata = "{\"metadata\":{\"identifier\":\"book-1\"},\"files\":["
+                + "{\"name\":\"01.mp3\",\"format\":\"VBR MP3\",\"source\":\"original\"},"
+                + "{\"name\":\"01_64kb.mp3\",\"format\":\"64Kbps MP3\",\"source\":\"derivative\",\"original\":\"01.mp3\"},"
+                + "{\"name\":\"02.flac\",\"format\":\"Flac\",\"source\":\"original\"},"
+                + "{\"name\":\"02.mp3\",\"format\":\"VBR MP3\",\"source\":\"derivative\",\"original\":\"02.flac\"},"
+                + "{\"name\":\"03_64kb.mp3\",\"format\":\"64Kbps MP3\",\"source\":\"derivative\",\"original\":\"03.flac\"},"
+                + "{\"name\":\"03.mp3\",\"format\":\"VBR MP3\",\"source\":\"derivative\",\"original\":\"03.flac\"}]}";
+        List<AudioPOJO> chapters = AudioModel.parseArchiveOrgMetadata(metadata, "Книга");
+        assertEquals(3, chapters.size());
+        String download = "https://archive.org/download/book-1/";
+        assertEquals(download + "01.mp3", chapters.get(0).getUrl());
+        assertEquals(download + "02.mp3", chapters.get(1).getUrl());
+        assertEquals(download + "03.mp3", chapters.get(2).getUrl());
+    }
+
+    @Test
+    public void relativeUrlsResolveAgainstTheFinalLocation() throws IOException {
+        String player = "<script>var p = new BookPlayer(1, [{\"title\":\"a\",\"url\":\"1.mp3\"}]);</script>";
+        List<AudioPOJO> chapters = AudioModel.load("https://knigavuhe.org/book/old",
+                url -> Jsoup.parse(player, "https://knigavuhe.org/book/new/")); // after the redirect
+        assertEquals("https://knigavuhe.org/book/new/1.mp3", chapters.get(0).getUrl());
+        Document frame = Jsoup.parse("<div class=\"js-play8-playlist\" value='[{\"sources\":[{\"file\":\"audio/1.mp3\"}]}]'>"
+                + "</div>", "https://player.example/book/");
+        assertEquals("https://player.example/book/audio/1.mp3",
+                AudioModel.parseBazaKnigPlay8(frame, "Книга").get(0).getUrl());
+    }
+
+    @Test
+    public void goPhpBase64KeepsItsPlus() {
+        // "aHR0cHM6Ly94Lm9yZy9+Pn4vMS5tcDM=" is base64 of https://x.org/~>~/1.mp3
+        assertEquals("https://x.org/~>~/1.mp3",
+                AudioModel.playerjsUrl("/engine/go.php?url=aHR0cHM6Ly94Lm9yZy9+Pn4vMS5tcDM%3D"));
+    }
+
+    @Test
+    public void aknigaBidIsTheCurrentBooksNotARelatedOne() {
+        Document doc = Jsoup.parse("<div class=\"related\"><a class=\"book\" data-bid=\"2\"></a></div>"
+                + "<article class=\"book--page\" data-bid=\"1\"><div class=\"player--chapters\" data-bid=\"1\"></div>"
+                + "</article>", AKNIGA);
+        assertEquals("1", AudioModel.aknigaBid(doc));
+    }
+
+    @Test
+    public void playerjsMarkersWithAndWithoutJunk() {
+        // marker+junk+marker: the junk ("$$#!!@#") between the markers is dropped
+        assertEquals("https://cdn.example.org/pair.mp3",
+                AudioModel.playerjsUrl("#2aHR0cHM6Ly9jZG4uZXhhbXBsZS5vcmcv//_//JCQjISFAIw==//_//cGFpci5tcDM="));
+        // markers only: everything between them is payload
+        String b64 = "aHR0cHM6Ly9jZG4uZXhhbXBsZS5vcmcvb2svMS5tcDM="; // https://cdn.example.org/ok/1.mp3
+        assertEquals("https://cdn.example.org/ok/1.mp3",
+                AudioModel.playerjsUrl("#2" + b64.substring(0, 4) + "//_//" + b64.substring(4, 16) + "//_//"
+                        + b64.substring(16)));
+    }
+
+    private static List<AudioPOJO> akniga(String items) throws IOException {
+        JsonObject book = JsonParser.parseString(text("akniga/ajax.json")).getAsJsonObject();
+        book.add("items", JsonParser.parseString(items));
+        return AudioModel.parseAkniga(Jsoup.parse(""), book.toString(), AKNIGA);
+    }
+
+    private static void assertClip(AudioPOJO clip, int start, int finish) {
+        assertEquals(start, clip.getTimeStart());
+        assertEquals(finish, clip.getTimeFinish());
+    }
+
+    private static Document izibuk(String tracks) {
+        return Jsoup.parse("<script>var player = new XSPlayer({\"mp3_url_prefix\":\"cdn.example.org\\/audio\","
+                + "\"sign\":\"md5=a\",\"tracks\":[" + tracks + "]});</script>", IZIBUK);
     }
 
     private static String decode(String base64) {

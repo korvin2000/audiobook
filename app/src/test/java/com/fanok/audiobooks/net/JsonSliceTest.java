@@ -15,6 +15,19 @@ public class JsonSliceTest {
     }
 
     @Test
+    public void bracketInsideAStringArgumentIsNotTheLiteral() {
+        assertEquals("[{\"a\":1}]", JsonSlice.after("new BookPlayer(\"book[1]\", [{\"a\":1}]);", "new BookPlayer(", '['));
+    }
+
+    @Test
+    public void commentsAreStrippedButStringsKept() {
+        assertEquals("var u = \"http://x/*y*/\";   var v = 'a//b'; \n",
+                JsonSlice.stripComments("var u = \"http://x/*y*/\"; /* old */ var v = 'a//b'; // tail\n"));
+        assertEquals("[2]", JsonSlice.after("/* new P([1]); */ new P([2]);", "new P(", '['));
+        assertThrows(IllegalStateException.class, () -> JsonSlice.after("// new P([1]);", "new P(", '['));
+    }
+
+    @Test
     public void missingMarkerOrUnbalancedLiteralIsIllegalState() {
         assertThrows(IllegalStateException.class, () -> JsonSlice.after("domReady(function(){})", "new Player(", '['));
         assertThrows(IllegalStateException.class, () -> JsonSlice.after("new Player(1, [{\"a\":1}", "new Player(", '['));
