@@ -9,6 +9,7 @@ import android.content.Intent;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadIndex;
@@ -31,7 +32,7 @@ import org.jetbrains.annotations.NotNull;
  * Runs the downloads of the one process-wide {@link DownloadManager}. Completed media stays in the Media3 cache, the
  * authoritative copy; exporting to the download folder is a separate step the user asks for on the Downloads screen.
  */
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class ExoDownloadService extends DownloadService {
 
 

@@ -232,7 +232,7 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
     }
 
     private final BroadcastReceiver updateAdapter = new BroadcastReceiver() {
-        @UnstableApi
+        @OptIn(markerClass = UnstableApi.class)
         @Override
         public void onReceive(Context context, Intent intent) {
             updateAdapter();
@@ -250,7 +250,7 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
 
 
     @SuppressLint("NotifyDataSetChanged")
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public void updateAdapter() {
         mPresenter.updateData();

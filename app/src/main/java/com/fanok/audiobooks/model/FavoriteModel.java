@@ -4,6 +4,7 @@ import static com.fanok.audiobooks.util.DownloadUtil.getDownloadManager;
 
 import android.content.Context;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadIndex;
@@ -28,7 +29,7 @@ public class FavoriteModel implements
         mContext = context;
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public Observable<ArrayList<BookPOJO>> getBooks(int table) {
         return Observable.create(observableEmitter -> {

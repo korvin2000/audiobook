@@ -14,15 +14,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- PlatformScheduler persists its download-restart job across reboots. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- ExoPlayer holds wake/Wi-Fi locks while streaming (WAKE_MODE_NETWORK). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Downloads live in app-specific storage; shared folders are reached through SAF. File-path access to a
+         user folder needs these only up to API 29 (legacy storage) / 32 (reads before READ_MEDIA_*). -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
-    <uses-permission
-        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
+        android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
 
     <queries>
         <intent>

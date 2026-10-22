@@ -6,6 +6,7 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadCursor;
@@ -38,6 +39,7 @@ public class ClearSavedModel {
     }
 
     /** One book being assembled: its saved row or download data, and its downloads. */
+    @OptIn(markerClass = UnstableApi.class)
     private static final class Group {
         String bookUrl;
         BookPOJO book;
@@ -48,7 +50,7 @@ public class ClearSavedModel {
      * A fresh immutable snapshot of every book with a download, an exported copy or a Saved row. Call off the main
      * thread; nothing shared is mutated.
      */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @NonNull
     public List<DownloadItem> loadSnapshot() throws java.io.IOException {
         Map<String, Download> byId = new HashMap<>();
@@ -96,7 +98,7 @@ public class ClearSavedModel {
     }
 
     /** The book's state from all of its chapters; without chapter rows, from its downloads alone. */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @NonNull
     private static DownloadItem aggregate(@NonNull Group g, @NonNull List<BooksAudioEntity> rows,
                                           @NonNull Map<String, Download> byId) {

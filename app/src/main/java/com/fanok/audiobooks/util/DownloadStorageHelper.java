@@ -123,9 +123,12 @@ public class DownloadStorageHelper {
         if (uri == null) return;
 
         try {
-            int takeFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            if (takeFlags != 0) {
-                context.getContentResolver().takePersistableUriPermission(uri, takeFlags);
+            boolean read = (data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0;
+            boolean write = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
+            if (read || write) {
+                context.getContentResolver().takePersistableUriPermission(uri,
+                        (read ? Intent.FLAG_GRANT_READ_URI_PERMISSION : 0)
+                                | (write ? Intent.FLAG_GRANT_WRITE_URI_PERMISSION : 0));
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -234,7 +237,7 @@ public class DownloadStorageHelper {
      * local_uri is recorded only once its file is complete under its final name; asking again resumes after an
      * interruption. HLS streams stay Media3 assets and are not exported.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     public static void exportBooks(@NonNull Context context, @NonNull Collection<String> bookUrls,
                                    @Nullable ExportCallback callback) {
         final Context app = context.getApplicationContext();
@@ -293,7 +296,7 @@ public class DownloadStorageHelper {
     }
 
     /** Writes one chapter below the download folder (file path first, else the selected SAF tree); returns its URI. */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static String exportChapter(@NonNull Context context, @NonNull Cache cache, @NonNull Download download,
                                         @Nullable BookPOJO book, @NonNull String bookUrl, @NonNull BooksAudioEntity row,
@@ -329,7 +332,7 @@ public class DownloadStorageHelper {
      * never replaced or truncated. The extension is sniffed from the first bytes. Throws, leaving nothing behind,
      * unless exactly {@code length} bytes were copied.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     public static File exportToDir(@NonNull Cache cache, @NonNull String key, @NonNull Uri uri, long length,
                                    @NonNull File dir, int number, @Nullable String title,
@@ -366,7 +369,7 @@ public class DownloadStorageHelper {
     }
 
     /** SAF variant of {@link #exportToDir}: a temp document renamed with renameDocument; returns the renamed URI. */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static String exportToTree(@NonNull Context context, @NonNull DocumentFile dir, @NonNull Cache cache,
                                        @NonNull String key, @NonNull Uri uri, long length, int number,
@@ -503,9 +506,9 @@ public class DownloadStorageHelper {
 
         try {
             String docId = null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && DocumentsContract.isTreeUri(uri)) {
+            if (DocumentsContract.isTreeUri(uri)) {
                 docId = DocumentsContract.getTreeDocumentId(uri);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && DocumentsContract.isDocumentUri(context, uri)) {
+            } else if (DocumentsContract.isDocumentUri(context, uri)) {
                 docId = DocumentsContract.getDocumentId(uri);
             }
 
@@ -1038,7 +1041,7 @@ public class DownloadStorageHelper {
     }
 
     /** Plan rows of one book carrying every download id each chapter may be stored under (current and legacy). */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static java.util.Map<Integer, DeletionPlanner.Row> planRows(@NonNull String bookUrl,
                                                                         @NonNull List<BooksAudioEntity> bookRows) {
@@ -1057,7 +1060,7 @@ public class DownloadStorageHelper {
      * download still needed by a row that is not chosen (a shared HLS stream), deletes exactly their recorded copies,
      * then clears or removes only the rows whose copies are gone. Returns how many rows were fully handled.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     private static int applyPlan(@NonNull Context context, @NonNull AudioListDBModel model, @NonNull String bookUrl,
                                  @NonNull List<BooksAudioEntity> bookRows, @NonNull List<BooksAudioEntity> chosen,
                                  boolean keepOnlineRows, @NonNull Set<String> removedIds) {
@@ -1126,7 +1129,7 @@ public class DownloadStorageHelper {
     }
 
     /** True while a row still has a local copy or a completed Media3 download that is not being removed. */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     private static boolean anyDownloaded(@NonNull Context context, @NonNull String bookUrl,
                                          @NonNull List<BooksAudioEntity> rows, @NonNull Set<String> removedIds) {
         DownloadIndex index = null;

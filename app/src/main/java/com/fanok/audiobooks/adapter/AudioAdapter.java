@@ -19,6 +19,7 @@ import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadIndex;
@@ -37,7 +38,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /** @noinspection ClassEscapesDefinedScope*/
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> {
 
     private static final String TAG = "AudioAdapter";

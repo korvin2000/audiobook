@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.os.Build;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 
 import com.fanok.audiobooks.activity.ClearSavedActivity;
@@ -17,7 +18,7 @@ import com.fanok.audiobooks.broadcasts.DownloadActionReceiver;
 
 public class NotificationDownload {
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     public static Notification getNotification(Context context, @Nullable String id, int progress, boolean stateDownload) {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

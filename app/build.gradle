@@ -1,5 +1,17 @@
 apply plugin: 'com.android.application'
 
+// Release signing comes only from the git-ignored keystore.properties at the repository root
+// (format: keystore.properties.example). Without it the release build fails instead of signing with a debug key.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+    // Checks use assert, not throw: AGP 8.13 lint silently skips all checks of a build.gradle containing a throw.
+    ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { key ->
+        assert keystoreProperties.getProperty(key): "${keystorePropertiesFile} has no '${key}' (see keystore.properties.example)"
+    }
+}
+
 android {
     namespace "com.fanok.audiobooks"
 
@@ -15,15 +27,13 @@ android {
     }
 
     signingConfigs {
-        release {
-            storeFile file(System.getProperty('user.home') + '/.android/debug.keystore')
-            keyAlias = 'androiddebugkey'
-            storePassword 'android'
-            keyPassword 'android'
-            v1SigningEnabled true
-            v2SigningEnabled true
-            enableV3Signing false
-            enableV4Signing false
+        if (keystorePropertiesFile.exists()) {
+            release {
+                storeFile rootProject.file(keystoreProperties.getProperty('storeFile'))
+                storePassword keystoreProperties.getProperty('storePassword')
+                keyAlias keystoreProperties.getProperty('keyAlias')
+                keyPassword keystoreProperties.getProperty('keyPassword')
+            }
         }
     }
     compileSdk 36
@@ -35,7 +45,7 @@ android {
         }
 
         applicationId "com.fanok.audiobooks"
-        minSdkVersion 23
+        minSdkVersion 24 // 24+: network_security_config trust anchors (ISRG Root X1) work without bundling Conscrypt
         targetSdkVersion 34
         versionCode 95
         versionName "7.3"
@@ -44,7 +54,6 @@ android {
             androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
         }
         vectorDrawables.useSupportLibrary = true
-        signingConfig signingConfigs.release
 
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
@@ -56,10 +65,7 @@ android {
             shrinkResources true
             debuggable false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
-        }
-        debug {
-            signingConfig signingConfigs.release
+            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : null
         }
     }
     compileOptions {
@@ -69,9 +75,16 @@ android {
     }
 }
 
-dependencies {
-    implementation fileTree(include: ['*.jar'], dir: 'libs')
+tasks.configureEach { task ->
+    if (task.name == 'packageRelease' || task.name == 'packageReleaseBundle') {
+        task.doFirst {
+            assert keystorePropertiesFile.exists(): "Release signing is not configured: create ${keystorePropertiesFile} " +
+                    "with storeFile, storePassword, keyAlias and keyPassword (see keystore.properties.example)"
+        }
+    }
+}
 
+dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.legacy:legacy-support-v4:1.0.0'
     implementation('com.google.android.material:material:1.13.0') {
@@ -79,11 +92,10 @@ dependencies {
     }
     implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
-    implementation('androidx.lifecycle:lifecycle-extensions:2.2.0') {
-        exclude group: 'androidx'
-    }
     implementation 'androidx.activity:activity:1.12.2'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
+    androidTestImplementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
     androidTestImplementation 'androidx.test:runner:1.7.0'
     androidTestImplementation 'androidx.test:rules:1.7.0'
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
@@ -99,14 +111,12 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.13.2'
     implementation 'de.hdodenhof:circleimageview:3.1.0'
 
-    //noinspection GradleDependency
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
-    implementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
     implementation 'androidx.media3:media3-exoplayer:1.9.0'
     implementation 'androidx.media3:media3-exoplayer-hls:1.9.0'
-    implementation 'androidx.media3:media3-ui:1.9.0'
-    implementation 'androidx.media3:media3-session:1.9.0'
     implementation 'androidx.media3:media3-datasource-okhttp:1.9.0'
+    // MediaSessionCompat / MediaBrowserServiceCompat / MediaButtonReceiver used by MediaPlayerService
+    implementation 'androidx.media:media:1.7.0'
 
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'tech.schoolhelper:moxy-x-androidx:1.7.0'
@@ -123,7 +133,6 @@ dependencies {
 
     implementation 'com.alimuzaffar.lib:pinentryedittext:2.0.6'
     implementation 'com.google.android.play:review:2.0.2'
-    implementation 'org.conscrypt:conscrypt-android:2.5.2'
 
     implementation 'com.github.lzyzsd:circleprogress:1.2.1'
     implementation 'com.h6ah4i.android.widget.verticalseekbar:verticalseekbar:1.0.0'
@@ -131,9 +140,7 @@ dependencies {
 
     implementation 'it.xabaras.android:recyclerview-swipedecorator:1.4'
 
-    implementation 'io.apisense:rhino-android:1.1.1'
     implementation 'com.github.evgenyneu:js-evaluator-for-android:6.0.0'
-    implementation "androidx.work:work-runtime:2.11.0"
 
     def room_version = "2.8.4"
     implementation "androidx.room:room-runtime:$room_version"
