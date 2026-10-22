@@ -88,13 +88,6 @@
     </PreferenceScreen>
 
 
-    <CheckBoxPreference
-        android:defaultValue="false"
-        android:icon="@drawable/ic_speedometer"
-        android:key="speed_up_search_abmp3"
-        android:summary="@string/speed_up_search_abmp3_desc"
-        android:title="@string/speed_up_search_abmp3" />
-
     <ListPreference
         android:defaultValue="@string/books_adapter_layout_list_value"
         android:dialogTitle="@string/books_adapter_layout"
@@ -169,13 +162,6 @@
         android:key="scrollToSelectedPref"
         android:summary="@string/scrollToSelectedDesc"
         android:title="@string/scrollToSelected" />
-
-    <CheckBoxPreference
-        android:defaultValue="true"
-        android:icon="@drawable/ic_waves"
-        android:key="search_multithreading"
-        android:summary="@string/search_multithreading"
-        android:title="@string/multithreading" />
 
     <EditTextPreference
         android:defaultValue="60"

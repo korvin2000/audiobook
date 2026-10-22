@@ -107,6 +107,8 @@ public class Url {
         HOST_ALIASES.put("baza-knig.ink", "baza-knig.top");
         HOST_ALIASES.put("izibuk.ru", "izib.uk");
         HOST_ALIASES.put("audioboo.ru", "audioboo.org");
+        HOST_ALIASES.put("m.knigavuhe.org", "knigavuhe.org");
+        HOST_ALIASES.put("pda.izibuk.ru", "izib.uk");
     }
 
     /** Lower-case host of {@code url} without a leading {@code www.}; empty when unparsable. */

@@ -181,55 +181,28 @@
             android:noHistory="true"
             android:screenOrientation="locked"
             android:theme="@style/AppTheme.NoAnimTheme">
-            <intent-filter>
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data
-                    android:host="m.knigavuhe.org"
-                    android:scheme="https" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="knigavuhe.org"
-                    android:scheme="https" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="audiobook-mp3.com"
-                    android:scheme="https" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="akniga.org"
-                    android:scheme="https" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="baza-knig.ink"
-                    android:scheme="https" />
+                <data android:scheme="https" />
+                <data android:host="knigavuhe.org" />
+                <data android:host="m.knigavuhe.org" />
+                <data android:host="izib.uk" />
+                <data android:host="izibuk.ru" />
+                <data android:host="pda.izibuk.ru" />
+                <data android:host="audiobook-mp3.com" />
+                <data android:host="akniga.org" />
+                <data android:host="baza-knig.top" />
+                <data android:host="baza-knig.ink" />
+                <data android:host="www.knigoblud.club" />
+                <data android:host="knigoblud.club" />
+                <data android:host="audioboo.org" />
+                <data android:host="audioboo.ru" />
+                <data android:host="otrub.in" />
+                <data android:host="poleknig.com" />
             </intent-filter>
         </activity>
 
