@@ -238,6 +238,11 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
             });
         }
 
+        // холодный ACTION_SEARCH (голосовой поиск, экземпляр под BookActivity) приходит в onCreate;
+        // при пересоздании (поворот) запрос уже хранится в презентере
+        if (savedInstanceState == null) {
+            handleIntent(intent);
+        }
     }
 
     private int getCount() {
@@ -272,9 +277,17 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     @Override
     protected void onNewIntent(@NonNull Intent intent) {
         super.onNewIntent(intent);
-        if (Intent.ACTION_SEARCH.equals(intent.getAction())) {
+        setIntent(intent);
+        handleIntent(intent);
+        if (binding != null) {
+            binding.list.requestFocus();
+        }
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent != null && binding != null && Intent.ACTION_SEARCH.equals(intent.getAction())) {
             String query = intent.getStringExtra(SearchManager.QUERY);
-            if (query != null && binding != null) {
+            if (query != null) {
                 SearchRecentSuggestions suggestions = new SearchRecentSuggestions(this,
                         MySuggestionProvider.AUTHORITY, MySuggestionProvider.MODE);
                 suggestions.saveRecentQuery(query, null);
@@ -282,9 +295,6 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
                 mPresenter.setQuery(query);
                 mPresenter.loadBoks();
             }
-        }
-        if (binding != null) {
-            binding.list.requestFocus();
         }
     }
 
