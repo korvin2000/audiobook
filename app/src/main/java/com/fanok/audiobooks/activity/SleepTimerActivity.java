@@ -23,7 +23,6 @@ import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.MvpAppCompatActivity;
 import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.fanok.audiobooks.Hourglass;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.interface_pacatge.sleep_timer.SleepTimerView;
 import com.fanok.audiobooks.presenter.SleepTimerPresenter;
@@ -53,11 +52,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
 
     private BroadcastReceiver finihTimer;
 
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,6 +110,7 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         } else {
             mStart.setImageResource(R.drawable.ic_play);
         }
+        mStart.setContentDescription(getString(started ? R.string.stop : R.string.play));
     }
 
     @Override

@@ -96,6 +96,7 @@ import com.fanok.audiobooks.model.BooksDBModel;
 import com.fanok.audiobooks.pojo.AudioPOJO;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.presenter.BookPresenter;
 import com.fanok.audiobooks.presenter.SleepTimerPresenter;
 import com.fanok.audiobooks.room.BooksAudioEntity;
@@ -468,20 +469,40 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         return new MediaBrowserServiceCompat.BrowserRoot(MY_MEDIA_ROOT_ID, null);
     }
 
+    /** The current book's chapters, unless parental control hides the book; the policy is read off this thread. */
     @Override
     public void onLoadChildren(@NonNull final String parentId, @NonNull final Result<List<MediaItem>> result) {
-        List<MediaBrowserCompat.MediaItem> mediaItems = new ArrayList<>();
-        if (MY_MEDIA_ROOT_ID.equals(parentId) && hasBook()) {
-            for (int i = 0; i < chapters.size(); i++) {
-                MediaDescriptionCompat description = new MediaDescriptionCompat.Builder()
-                        .setMediaId(Integer.toString(i))
-                        .setTitle(chapters.get(i).getName())
-                        .setSubtitle(bookName())
-                        .build();
-                mediaItems.add(new MediaBrowserCompat.MediaItem(description, FLAG_PLAYABLE));
-            }
+        if (!MY_MEDIA_ROOT_ID.equals(parentId) || !hasBook()) {
+            result.sendResult(new ArrayList<>());
+            return;
         }
-        result.sendResult(mediaItems);
+        final String url = bookUrl;
+        final String subtitle = bookName();
+        final List<MediaBrowserCompat.MediaItem> mediaItems = new ArrayList<>();
+        for (int i = 0; i < chapters.size(); i++) {
+            MediaDescriptionCompat description = new MediaDescriptionCompat.Builder()
+                    .setMediaId(Integer.toString(i))
+                    .setTitle(chapters.get(i).getName())
+                    .setSubtitle(subtitle)
+                    .build();
+            mediaItems.add(new MediaBrowserCompat.MediaItem(description, FLAG_PLAYABLE));
+        }
+        final Context app = getApplicationContext();
+        result.detach();
+        boolean queued = execDb(() -> {
+            boolean allowed;
+            try {
+                allowed = ParentalControl.isAllowed(app, new BooksDBModel(app).getSomewhere(url));
+            } catch (RuntimeException e) {
+                Log.w(TAG, "onLoadChildren: cannot read the book", e);
+                allowed = false;
+            }
+            final List<MediaBrowserCompat.MediaItem> children = allowed ? mediaItems : new ArrayList<>();
+            handler.post(() -> result.sendResult(children));
+        });
+        if (!queued) {
+            result.sendResult(new ArrayList<>());
+        }
     }
 
     @Override
