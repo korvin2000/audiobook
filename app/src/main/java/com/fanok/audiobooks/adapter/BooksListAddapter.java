@@ -435,47 +435,37 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                             ArrayList<AudioListPOJO> list = audioListModel.get(url);
                             if (list != null && !list.isEmpty()) {
                                 int count = 0;
-                                java.io.File bookDir = null;
-                                try {
-                                    bookDir = com.fanok.audiobooks.util.DownloadStorageHelper.getBookDownloadDir(ctx, url, b.getName(), b.getArtist(), b.getAutor());
-                                } catch (Exception ignored) {}
-
+                                // A chapter counts as downloaded when its row records an app-written copy, when it is an
+                                // imported local file, or when its Media3 download (resolved by chapter identity) is complete.
+                                java.util.Set<String> withCopy = new java.util.HashSet<>();
+                                for (com.fanok.audiobooks.room.BooksAudioEntity row : audioListModel.getRows(url)) {
+                                    if (row.localUri != null && !row.localUri.isEmpty()) withCopy.add(row.urlAudio);
+                                }
+                                java.util.Map<String, Download> downloads = java.util.Collections.emptyMap();
+                                if (downloadIndex != null) {
+                                    java.util.List<String> urls = new java.util.ArrayList<>();
+                                    for (AudioListPOJO pojo : list) {
+                                        if (pojo != null && pojo.getAudioUrl() != null) urls.add(pojo.getAudioUrl());
+                                    }
+                                    try {
+                                        downloads = DownloadUtil.downloadsByChapterUrl(ctx, downloadIndex, url, urls);
+                                    } catch (Exception ignored) {}
+                                }
                                 for (AudioListPOJO pojo : list) {
                                     if (pojo == null) continue;
-                                    boolean isTrackDownloaded = false;
                                     String aUrl = pojo.getAudioUrl();
-                                    if (aUrl != null && !aUrl.isEmpty()) {
+                                    boolean isTrackDownloaded = withCopy.contains(aUrl);
+                                    if (!isTrackDownloaded && aUrl != null && !aUrl.isEmpty()) {
                                         if (aUrl.startsWith("content://") || aUrl.startsWith("file://")) {
                                             isTrackDownloaded = true;
                                         } else if (aUrl.startsWith("/")) {
-                                            if (new java.io.File(aUrl).exists()) {
-                                                isTrackDownloaded = true;
-                                            }
+                                            isTrackDownloaded = new java.io.File(aUrl).exists();
                                         }
                                     }
-
-                                    if (!isTrackDownloaded && downloadIndex != null) {
-                                        try {
-                                            Download d1 = downloadIndex.getDownload(pojo.getCleanAudioUrl());
-                                            if (d1 != null && d1.state == Download.STATE_COMPLETED) {
-                                                isTrackDownloaded = true;
-                                            } else if (aUrl != null) {
-                                                Download d2 = downloadIndex.getDownload(aUrl);
-                                                if (d2 != null && d2.state == Download.STATE_COMPLETED) {
-                                                    isTrackDownloaded = true;
-                                                }
-                                            }
-                                        } catch (Exception ignored) {}
+                                    if (!isTrackDownloaded) {
+                                        Download d = downloads.get(aUrl);
+                                        isTrackDownloaded = d != null && d.state == Download.STATE_COMPLETED;
                                     }
-
-                                    if (!isTrackDownloaded && bookDir != null && bookDir.exists() && pojo.getAudioName() != null) {
-                                        String sanitized = com.fanok.audiobooks.util.DownloadStorageHelper.sanitizeFileName(pojo.getAudioName());
-                                        java.io.File trackFile = new java.io.File(bookDir, sanitized + ".mp3");
-                                        if (trackFile.exists()) {
-                                            isTrackDownloaded = true;
-                                        }
-                                    }
-
                                     if (isTrackDownloaded) {
                                         count++;
                                     }
