@@ -69,7 +69,7 @@ public class ComentsBookFragment extends MvpAppCompatFragment implements Coments
 
         LinearLayoutManager linearLayoutManager = new LinearLayoutManager(getContext());
         binding.list.setLayoutManager(linearLayoutManager);
-        if (!url.contains(Url.SERVER_BAZA_KNIG)) {
+        if (!Url.isHost(Url.canonical(url), Url.SERVER_BAZA_KNIG)) {
             mComentsListAddapter = new ComentsListAddapter(getContext());
             mAnswerListAddapter = new AnswerListAddapter(getContext());
             mComentsListAddapter.setListener((view12, position) -> {
@@ -136,7 +136,7 @@ public class ComentsBookFragment extends MvpAppCompatFragment implements Coments
         } else {
             binding.placeholder.setVisibility(View.GONE);
         }
-        if (!url.contains(Url.SERVER_BAZA_KNIG)) {
+        if (!Url.isHost(Url.canonical(url), Url.SERVER_BAZA_KNIG)) {
             mComentsListAddapter.setItem(data);
         } else {
             mComentsListBazaKnigAddapter.setItem(data);
