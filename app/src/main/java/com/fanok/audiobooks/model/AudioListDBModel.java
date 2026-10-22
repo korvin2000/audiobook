@@ -96,13 +96,23 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
                 String url = chapters.get(i).getAudioUrl();
                 ArrayDeque<Integer> same = DeletionPlanner.isRemote(url) ? byId.get(DownloadStorageHelper.downloadIdOf(url)) : null;
                 if (same != null && !same.isEmpty()) {
-                    int j = same.poll();
+                    // Several chapters may share one URL (HLS): prefer the row with the same name, else the next one.
+                    Integer j = null;
+                    for (Integer k : same) {
+                        if (sameName(old.get(k), chapters.get(i))) {
+                            j = k;
+                            break;
+                        }
+                    }
+                    if (j == null) j = same.peek();
+                    same.remove(j);
                     match[i] = old.get(j);
                     used[j] = true;
                 }
             }
             for (int i = 0; i < chapters.size(); i++) {
-                if (match[i] == null && i < old.size() && !used[i]) {
+                // Same position is only evidence when the name agrees; a different chapter must not inherit a copy.
+                if (match[i] == null && i < old.size() && !used[i] && sameName(old.get(i), chapters.get(i))) {
                     match[i] = old.get(i);
                     used[i] = true;
                 }
@@ -116,10 +126,6 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
                     row.time = chapter.getTime();
                     row.timeStart = chapter.getTimeStart();
                     row.timeEnd = chapter.getTimeEnd();
-                } else if (row.localUri == null && row.urlAudio != null && !row.urlAudio.isEmpty()
-                        && !DeletionPlanner.isRemote(row.urlAudio)) {
-                    // Before local_uri existed the exporter overwrote url_audio with its copy: record it as owned.
-                    row.localUri = row.urlAudio;
                 }
                 row.booksName = chapter.getBookName();
                 row.nameAudio = chapter.getAudioName();
@@ -134,6 +140,10 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
                 }
             }
         });
+    }
+
+    private static boolean sameName(BooksAudioEntity row, AudioListPOJO chapter) {
+        return row.nameAudio != null && row.nameAudio.equals(chapter.getAudioName());
     }
 
     @Override
