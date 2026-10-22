@@ -1,14 +1,12 @@
 package com.fanok.audiobooks.activity;
 
 import static com.fanok.audiobooks.Consts.handleUserInput;
-import static com.fanok.audiobooks.service.MediaPlayerService.getNotificationId;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import android.app.NotificationManager;
 import android.app.UiModeManager;
 import android.content.Context;
 import android.content.Intent;
@@ -48,7 +46,6 @@ import com.fanok.audiobooks.interface_pacatge.main.MainView;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.presenter.MainPresenter;
-import com.fanok.audiobooks.service.MediaPlayerService;
 import com.google.android.material.navigation.NavigationView;
 
 import java.util.ArrayList;
@@ -445,12 +442,7 @@ public class MainActivity extends MvpAppCompatActivity
 
     @Override
     protected void onDestroy() {
-        sendBroadcast(new Intent(MediaPlayerService.Broadcast_CloseIfPause));
-        NotificationManager notificationManager =
-                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (notificationManager != null) {
-            notificationManager.cancel(getNotificationId());
-        }
+        //playback belongs to the player service: closing (or rotating) this screen neither stops nor hides it
         super.onDestroy();
         mPresenter.onDestroy();
         closeApp = true;

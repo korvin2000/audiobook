@@ -148,45 +148,6 @@ public class DownloadUtil {
                 executor).createDownloader(request);
     }
 
-    /**
-     * Streaming source of the player while it still annotates URIs ({@link #buildAnnotatedUri}): the book context
-     * comes from the {@code __ref} parameter of the top-level URI; HLS children without it get the baza-knig context
-     * by parsed host only.
-     * @deprecated use {@link #playbackFor}, whose factory carries the context to every HLS child request.
-     */
-    @Deprecated
-    @NonNull
-    public static DataSource.Factory getResolvingUpstreamFactory(@NonNull Context context) {
-        OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(App.getOkHttpClient());
-        return new ResolvingDataSource.Factory(new DefaultDataSource.Factory(context.getApplicationContext(), http), dataSpec -> {
-            String book = legacyRefOf(dataSpec.uri);
-            if (book == null && Url.isHost(dataSpec.uri.toString(), Url.SERVER_BAZA_KNIG)) book = Url.SERVER_BAZA_KNIG;
-            Map<String, String> headers = requestHeaders(book);
-            String session = requestCookies(book).get("PHPSESSID");
-            if (session != null) headers.put("Cookie", "PHPSESSID=" + session);
-            headers.putAll(dataSpec.httpRequestHeaders);
-            return dataSpec.withUri(withoutLegacyRef(dataSpec.uri)).withRequestHeaders(headers);
-        });
-    }
-
-    /**
-     * @deprecated the player's legacy streaming URI; new downloads and {@link #playbackFor} use the plain chapter URL.
-     */
-    @Deprecated
-    public static Uri buildAnnotatedUri(String fileUrl, String urlBook) {
-        if (fileUrl == null || fileUrl.isEmpty()) return Uri.EMPTY;
-        if (fileUrl.startsWith("content://") || fileUrl.startsWith("file://")) {
-            return Uri.parse(fileUrl);
-        }
-        if (fileUrl.startsWith("/") || fileUrl.contains(":\\")) {
-            return Uri.fromFile(new java.io.File(fileUrl));
-        }
-        return Uri.parse(fileUrl)
-                .buildUpon()
-                .appendQueryParameter(LEGACY_REF, Uri.encode(urlBook))
-                .build();
-    }
-
     /** The URI without the legacy {@code __ref} parameter; other parameters stay byte-identical, no dangling '?'. */
     @NonNull
     static Uri withoutLegacyRef(@NonNull Uri uri) {
