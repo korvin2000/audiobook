@@ -64,10 +64,10 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
     private boolean isReceiverRegistered = false;
 
     @Override
-    protected void onResume() {
-        super.onResume();
+    protected void onStart() {
+        super.onStart();
         if (!isReceiverRegistered) {
-            // Only this app announces download changes.
+            // Only this app announces download changes; listened to while visible (UI-13).
             ContextCompat.registerReceiver(this, updateAdapter, new IntentFilter(Broadcast_UPDATE_ADAPTER),
                     ContextCompat.RECEIVER_NOT_EXPORTED);
             isReceiverRegistered = true;
@@ -75,26 +75,12 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
+    protected void onStop() {
         if (isReceiverRegistered) {
-            try {
-                unregisterReceiver(updateAdapter);
-            } catch (Exception ignored) {}
+            unregisterReceiver(updateAdapter);
             isReceiverRegistered = false;
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (isReceiverRegistered) {
-            try {
-                unregisterReceiver(updateAdapter);
-            } catch (Exception ignored) {}
-            isReceiverRegistered = false;
-        }
-        mPresenter.onDestroy();
+        super.onStop();
     }
 
     private DownloadAdapter mAdapter;

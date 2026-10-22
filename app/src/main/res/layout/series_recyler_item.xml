@@ -24,6 +24,7 @@
 
     <ImageView
         android:id="@+id/image"
+        android:contentDescription="@string/book_cover"
         android:layout_width="45dp"
         android:layout_height="60dp"
         android:layout_marginStart="8dp"
