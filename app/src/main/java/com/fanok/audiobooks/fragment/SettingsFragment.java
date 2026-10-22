@@ -30,10 +30,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
-import androidx.media3.exoplayer.offline.DownloadService;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.MultiSelectListPreference;
@@ -42,6 +40,7 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
+import com.fanok.audiobooks.AppThemes;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.MySuggestionProvider;
 import com.fanok.audiobooks.R;
@@ -54,8 +53,8 @@ import com.fanok.audiobooks.model.AudioDBModel;
 import com.fanok.audiobooks.model.AudioListDBModel;
 import com.fanok.audiobooks.model.BooksDBModel;
 import com.fanok.audiobooks.pojo.BackupPOJO;
+import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
-import com.fanok.audiobooks.service.ExoDownloadService;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
 import com.google.android.material.navigation.NavigationView;
 import com.google.gson.Gson;
@@ -264,13 +263,15 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         initSummary(getPreferenceScreen());
 
         preferenceChangeListner("pref_theme", (preference, newValue) -> {
-            if (newValue.equals(getString(R.string.theme_dark_value)) || newValue
-                    .equals(getString(R.string.theme_black_value))) {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-            } else {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-            }
-            requireActivity().recreate();
+            // the value is stored after this returns; apply night mode and restart once it is
+            Context context = requireContext().getApplicationContext();
+            requireActivity().getWindow().getDecorView().post(() -> {
+                AppThemes.applyNightMode(context);
+                if (getActivity() != null) {
+                    // dark and black share a night mode, so the restart is not implied
+                    getActivity().recreate();
+                }
+            });
             return true;
         });
 
@@ -296,47 +297,58 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             return true;
         });
 
+        // database work on the storage worker, never on the main thread (DATA-07)
         preferenceClickListner("clear_history", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_history,
-                    (dialogInterface, i) -> {
-                        BooksDBModel booksDBModel = new BooksDBModel(preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        BooksDBModel booksDBModel = new BooksDBModel(app);
                         booksDBModel.clearHistory();
                         booksDBModel.closeDB();
-                        AudioDBModel audioDBModel = new AudioDBModel(preference.getContext());
+                        AudioDBModel audioDBModel = new AudioDBModel(app);
                         audioDBModel.clearAll();
                         audioDBModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_favorite", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_favorite,
-                    (dialogInterface, i) -> {
-                        BooksDBModel dbModel = new BooksDBModel(
-                                preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        BooksDBModel dbModel = new BooksDBModel(app);
                         dbModel.clearFavorite();
                         dbModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_audio_list", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_audio_list,
-                    (dialogInterface, i) -> {
-                        AudioListDBModel dbModel = new AudioListDBModel(
-                                preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        AudioListDBModel dbModel = new AudioListDBModel(app);
                         dbModel.clearAll();
                         dbModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_savind", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_saved,
-                    (dialogInterface, i) -> {
-                        DownloadService.sendRemoveAllDownloads(
-                                requireContext(), ExoDownloadService.class, false);
-                    });
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        // every saved book: rows and recorded copies; imported books lose rows only
+                        BooksDBModel dbModel = new BooksDBModel(app);
+                        List<String> urls = new ArrayList<>();
+                        for (BookPOJO book : dbModel.getAllSaved()) {
+                            if (book.getUrl() != null) {
+                                urls.add(book.getUrl());
+                            }
+                        }
+                        dbModel.closeDB();
+                        DownloadStorageHelper.removeBooks(app, urls);
+                    }));
             return true;
         });
 
@@ -443,19 +455,18 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         if (context == null) return;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            try {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.addCategory("android.intent.category.DEFAULT");
-                intent.setData(Uri.parse(String.format("package:%s", requireContext().getPackageName())));
-                manageStoragePermissionOnlyLauncher.launch(intent);
-                return;
-            } catch (Exception e) {
-                try {
-                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                    manageStoragePermissionOnlyLauncher.launch(intent);
-                    return;
-                } catch (Exception ignored) {}
-            }
+            // say why before sending the user to system settings (UI-18)
+            new AlertDialog.Builder(context)
+                    .setTitle(R.string.select_folder)
+                    .setMessage(R.string.manage_storage_rationale)
+                    .setPositiveButton(R.string.continue_, (d, w) -> requestAllFilesAccess())
+                    .setNegativeButton(R.string.cancel, (d, w) -> {
+                        if (!DownloadStorageHelper.openFolderPicker(folderPickerLauncher)) {
+                            showFallbackFolderSelectionDialog(context);
+                        }
+                    })
+                    .show();
+            return;
         } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     != PackageManager.PERMISSION_GRANTED) {
@@ -482,6 +493,21 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
         });
         builder.show();
+    }
+
+    private void requestAllFilesAccess() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.addCategory("android.intent.category.DEFAULT");
+            intent.setData(Uri.parse(String.format("package:%s", requireContext().getPackageName())));
+            manageStoragePermissionOnlyLauncher.launch(intent);
+        } catch (Exception e) {
+            try {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                manageStoragePermissionOnlyLauncher.launch(intent);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void showFallbackFolderSelectionDialog(Context context) {

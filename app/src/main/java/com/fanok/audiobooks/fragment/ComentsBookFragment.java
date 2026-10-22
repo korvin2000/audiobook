@@ -114,7 +114,6 @@ public class ComentsBookFragment extends MvpAppCompatFragment implements Coments
         mComentsListAddapter = null;
         mAnswerListAddapter = null;
         mComentsListBazaKnigAddapter = null;
-        mPresenter.onDestroy();
         super.onDestroyView();
         binding = null;
     }

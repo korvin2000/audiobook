@@ -45,7 +45,10 @@ public class SeriesListAddapter extends RecyclerView.Adapter<SeriesListAddapter.
             mLinearLayout = itemView.findViewById(R.id.item);
 
             itemView.setOnClickListener(view -> {
-                if (mListener != null) mListener.onItemSelected(view, getBindingAdapterPosition());
+                int position = getBindingAdapterPosition();
+                if (mListener != null && position != RecyclerView.NO_POSITION) {
+                    mListener.onItemSelected(view, position);
+                }
             });
 
 
@@ -168,7 +171,7 @@ public class SeriesListAddapter extends RecyclerView.Adapter<SeriesListAddapter.
 
     @SuppressLint("NotifyDataSetChanged")
     public void setItem(ArrayList<SeriesPOJO> newModel) {
-        mModel = newModel;
+        mModel = newModel == null ? new ArrayList<>() : new ArrayList<>(newModel);
         notifyDataSetChanged();
     }
 

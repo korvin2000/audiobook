@@ -80,7 +80,7 @@
                         android:layout_gravity="center_vertical"
                         android:layout_marginStart="@dimen/text_margin_book_description"
                         android:layout_marginEnd="@dimen/text_margin_book_description"
-                        tools:ignore="ContentDescription" />
+                        android:contentDescription="@string/download_state_full" />
                 </LinearLayout>
 
                 <TextView
