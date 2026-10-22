@@ -77,6 +77,10 @@ public abstract class AppDatabase extends RoomDatabase {
             database.execSQL("ALTER TABLE `books_audio` ADD COLUMN `local_uri` TEXT");
             database.execSQL("ALTER TABLE `books_audio` ADD COLUMN `ordinal` INTEGER NOT NULL DEFAULT -1");
             database.execSQL("CREATE INDEX IF NOT EXISTS `index_books_audio_url_book` ON `books_audio` (`url_book`)");
+            // Rows the old exporter rewrote with a local path: the path is the app-written copy, so record it as such.
+            database.execSQL("UPDATE books_audio SET local_uri = url_audio WHERE local_uri IS NULL"
+                    + " AND url_book NOT LIKE '%/imported/%'"
+                    + " AND (url_audio LIKE '/%' OR url_audio LIKE 'content://%' OR url_audio LIKE 'file://%')");
         }
     };
 

@@ -748,7 +748,11 @@ public class ExoDownloadService extends DownloadService {
                     android.util.Log.w("DL", "Error checking remaining downloads", e);
                 }
 
-                if (!hasOtherDownloads) {
+                boolean hasCopies = false;
+                for (com.fanok.audiobooks.room.BooksAudioEntity row : new AudioListDBModel(downloadService).getRows(bookUrl)) {
+                    hasCopies |= row.localUri != null;
+                }
+                if (!hasOtherDownloads && !hasCopies) {
                     BooksDBModel dbModel = new BooksDBModel(downloadService);
                     if (book != null) {
                         dbModel.removeSaved(book);

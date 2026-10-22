@@ -1190,11 +1190,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
     }
 
     @Override
-    public void myUnbindService(@NotNull ServiceConnection serviceConnection) {
-        //the presenter binds through the application context and unbinds itself (unbindPlayerService)
-    }
-
-    @Override
     public Resources.Theme getTheme() {
         Resources.Theme theme = super.getTheme();
 
