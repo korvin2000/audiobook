@@ -37,6 +37,13 @@ public class SearchUrlsTest {
         PAGE_FORMAT.put(Provider.POLEKNIG, "&p=%d");
     }
 
+    private static String pageToken(Provider provider, Category category, int page) {
+        // akniga's ajax author/performer search is a query-string endpoint, its book search is a path
+        String format = provider == Provider.AKNIGA && category != Category.BOOKS
+                ? "&page=%d" : PAGE_FORMAT.get(provider);
+        return String.format(format, page);
+    }
+
     private static int count(String haystack, String needle) {
         int n = 0;
         for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
@@ -66,7 +73,7 @@ public class SearchUrlsTest {
                         assertEquals(where, 1, count(url, "%25") * (query.contains("%") ? 1 : 0)
                                 + (query.contains("%") ? 0 : 1));
                         assertFalse(where, url.contains("%2525"));
-                        String pageToken = String.format(PAGE_FORMAT.get(provider), page);
+                        String pageToken = pageToken(provider, category, page);
                         assertTrue(where + " lacks " + pageToken, url.contains(pageToken));
                     }
                 }
@@ -85,8 +92,9 @@ public class SearchUrlsTest {
                     continue;
                 }
                 assertNotEquals(provider + "/" + category, ten, eleven);
-                assertFalse(provider + "/" + category + " contains page 1 inside page 11: " + eleven,
-                        eleven.contains(String.format(PAGE_FORMAT.get(provider), 1)));
+                assertEquals(provider + "/" + category + " -> " + eleven,
+                        ten.replace(pageToken(provider, category, 10), pageToken(provider, category, 11))
+                                .replace("result_from=91", "result_from=101"), eleven);
                 assertEquals(provider + "/" + category + " -> " + one, 1, count(one, "1984"));
             }
         }

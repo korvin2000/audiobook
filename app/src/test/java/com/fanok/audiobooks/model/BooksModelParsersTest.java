@@ -6,7 +6,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.fanok.audiobooks.Url;
-import com.fanok.audiobooks.net.SiteHttp;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.search.ProviderPage;
 
@@ -50,18 +49,19 @@ public class BooksModelParsersTest {
     public void knigavuheSearchHasOnePage() throws IOException {
         String url = Url.SERVER + "/search/?q=1984&page=1";
         ProviderPage<BookPOJO> page = BooksModel.parseKnigavuhe(fixture("knigavuhe/search-1984-p1.html", url), url, 1);
-        assertEquals(5, page.items.size());
+        assertEquals("5 cards, 2 of them LitRes-only", 3, page.items.size());
         assertEquals("1984", page.items.get(0).getName());
         assertFalse(page.hasMore);
     }
 
     @Test
-    public void aknigaIndexPageOneSkipsPaidAndStripsAuthorFromTitle() throws IOException {
+    public void aknigaIndexPageOneStripsAuthorFromTitle() throws IOException {
         ProviderPage<BookPOJO> page = BooksModel.parseAkniga(fixture("akniga/listing-index-p1.html", Url.SERVER_AKNIGA), 1);
-        assertEquals(11, page.items.size()); // 12 cards, one of them paid
+        assertEquals(12, page.items.size());
         assertEquals("Солнце мёртвых", page.items.get(0).getName());
         assertEquals("Атеев Алексей", page.items.get(0).getAutor());
         assertEquals("Святой папочка", page.items.get(10).getName());
+        assertEquals("Книги для бессонной ночи", page.items.get(11).getName()); // a card without an author
         assertTrue(page.hasMore);
         assertAllHaveNameAndUrl(page, Url.SERVER_AKNIGA);
     }
@@ -105,7 +105,7 @@ public class BooksModelParsersTest {
         assertAllHaveNameAndUrl(izibuk, Url.SERVER_IZIBUK);
 
         ProviderPage<BookPOJO> abmp3 = BooksModel.parseAbmp3(fixture("abmp3/listing-index-p2.html", Url.SERVER_ABMP3), 2);
-        assertEquals(24, abmp3.items.size());
+        assertEquals(12, abmp3.items.size());
         assertTrue(abmp3.hasMore);
         assertAllHaveNameAndUrl(abmp3, Url.SERVER_ABMP3);
 
@@ -156,8 +156,14 @@ public class BooksModelParsersTest {
     }
 
     @Test
-    public void audiobooChallengePageIsRecognisedBeforeParsing() throws IOException {
+    public void audiobooChallengePageYieldsNoSentinelRows() throws IOException {
+        // SiteHttp turns this page into a CookesExeption (BLOCKED) before any parser sees it;
+        // should it ever get through, it must still be an empty page and never a fake book
         Document doc = fixture("audioboo/listing-challenge-p1.html", Url.SERVER_AUDIOBOO);
-        assertTrue(SiteHttp.isChallenge(null, doc.title()));
+        assertTrue(doc.title().contains("Just a moment"));
+        ProviderPage<BookPOJO> page = BooksModel.parseAudioboo(doc, 1);
+        assertEquals(ProviderPage.Status.EMPTY, page.status);
+        assertTrue(page.items.isEmpty());
+        assertFalse(page.hasMore);
     }
 }

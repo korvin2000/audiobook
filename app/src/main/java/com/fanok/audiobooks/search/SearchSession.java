@@ -217,7 +217,12 @@ public final class SearchSession<T> {
         }
         boolean added = false;
         for (T item : page.items) {
-            String k = key.apply(item);
+            String k;
+            try {
+                k = key.apply(item);
+            } catch (Exception e) {
+                k = null;
+            }
             if (k == null || seen.add(k)) {
                 items.add(item);
                 added = true;
