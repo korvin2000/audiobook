@@ -128,6 +128,31 @@ public final class DeletionPlanner {
         return best;
     }
 
+    /** Folders the exporter creates for a book's chapters: source, book and reader. */
+    public static final int BOOK_FOLDER_LEVELS = 3;
+
+    /**
+     * How many of the folders above an exported file may be pruned once empty, counted from the file's own folder.
+     * {@code folders} are their paths, outermost first, the file's folder last. At most the
+     * {@link #BOOK_FOLDER_LEVELS} the exporter created, and never a configured root nor a folder above one: the
+     * count stops at the first such folder, so a root moved to a deeper folder survives.
+     */
+    public static int prunableDepth(List<String> folders, Collection<String> roots) {
+        int depth = 0;
+        for (int k = folders.size() - 1; k >= 0 && depth < BOOK_FOLDER_LEVELS; k--) {
+            String f = normalize(folders.get(k));
+            if (f.isEmpty() || f.equals("/")) break;
+            boolean boundary = false;
+            for (String root : roots) {
+                String r = normalize(root);
+                if (!r.isEmpty() && (r.equals(f) || r.startsWith(f + "/"))) boundary = true;
+            }
+            if (boundary) break;
+            depth++;
+        }
+        return depth;
+    }
+
     private static boolean isRoot(String uri, Collection<String> roots) {
         String u = normalize(uri);
         for (String root : roots) {

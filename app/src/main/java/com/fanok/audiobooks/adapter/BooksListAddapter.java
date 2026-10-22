@@ -2,7 +2,6 @@ package com.fanok.audiobooks.adapter;
 
 import static android.content.Context.MODE_PRIVATE;
 import static android.content.Context.UI_MODE_SERVICE;
-import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_ENABLED;
 import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_PREFERENCES;
 
 import android.annotation.SuppressLint;
@@ -129,9 +128,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                 throw new NullPointerException();
             }
 
-            if (mPreferences.getBoolean(PARENTAL_CONTROL_ENABLED, false) && (book.getGenre() == null
-                    || book.getGenre().isEmpty() ||
-                    !mPreferences.getBoolean(book.getUrlGenre(), false))) {
+            if (!com.fanok.audiobooks.policy.ParentalControl.isAllowed(mImageView.getContext(), book)) {
                 Glide.with(mImageView).load(R.drawable.ic_parental_control).into(mImageView);
 
             } else {
@@ -257,10 +254,12 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
             } else if (dlStatus == 1) {
                 mIsDownload.setImageDrawable(
                         ContextCompat.getDrawable(mIsDownload.getContext(), R.drawable.ic_check_1));
+                mIsDownload.setContentDescription(mIsDownload.getContext().getString(R.string.download_state_partial));
                 mIsDownload.setVisibility(View.VISIBLE);
             } else {
                 mIsDownload.setImageDrawable(
                         ContextCompat.getDrawable(mIsDownload.getContext(), R.drawable.ic_check_all));
+                mIsDownload.setContentDescription(mIsDownload.getContext().getString(R.string.download_state_full));
                 mIsDownload.setVisibility(View.VISIBLE);
             }
 
@@ -394,7 +393,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                     boolean saved = dbModel.inSaved(url);
 
                     int progress = -1;
-                    if (procent && saved && audioListModel != null) {
+                    if (procent && audioListModel != null) {
                         ArrayList<AudioListPOJO> pos = audioListModel.get(url);
                         if (pos.isEmpty()) {
                             progress = -1;

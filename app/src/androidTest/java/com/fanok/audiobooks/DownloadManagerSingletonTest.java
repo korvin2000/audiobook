@@ -6,6 +6,7 @@ import static org.junit.Assert.assertSame;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Looper;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.cache.Cache;
 import androidx.media3.exoplayer.offline.DownloadCursor;
@@ -26,6 +27,17 @@ import org.junit.runner.RunWith;
 @UnstableApi
 @RunWith(AndroidJUnit4.class)
 public class DownloadManagerSingletonTest {
+
+    @Test
+    public void theManagerLivesOnTheMainLooperWhoeverAsksFirst() throws Exception {
+        final DownloadManager[] seen = new DownloadManager[1];
+        Thread background = new Thread(() -> seen[0] = DownloadUtil.getDownloadManager());
+        background.start();
+        background.join();
+
+        assertNotNull(seen[0]);
+        assertSame(Looper.getMainLooper(), seen[0].getApplicationLooper());
+    }
 
     @Test
     public void changingTheDownloadFolderKeepsTheOneManagerUsable() throws Exception {

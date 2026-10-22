@@ -291,7 +291,14 @@ public class FavoritePresenter extends MvpPresenter<FavoriteView> implements
         if (table == Consts.TABLE_SAVED) {
             if (book.getUrl() != null) {
                 // rows and the recorded copies, on the storage worker
-                DownloadStorageHelper.removeBooks(app, Collections.singletonList(book.getUrl()));
+                DownloadStorageHelper.removeBooks(app, Collections.singletonList(book.getUrl()),
+                        (removed, total, failed) -> {
+                            if (failed > 0) {
+                                android.widget.Toast.makeText(app, app.getString(R.string.remove_partial, removed, total, failed),
+                                        android.widget.Toast.LENGTH_LONG).show();
+                                loadBooksInternal();
+                            }
+                        });
             }
             return;
         }

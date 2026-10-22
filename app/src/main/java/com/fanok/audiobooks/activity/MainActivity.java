@@ -402,7 +402,6 @@ public class MainActivity extends MvpAppCompatActivity
     protected void onDestroy() {
         //playback belongs to the player service: closing (or rotating) this screen neither stops nor hides it
         super.onDestroy();
-        mPresenter.onDestroy();
         closeApp = true;
     }
 

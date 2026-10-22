@@ -74,7 +74,9 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
     /**
      * Upserts the parsed chapter list of an online book in one transaction. Existing rows are matched by download id,
      * then by position, and keep local_uri and their time columns; rows no longer listed are deleted only when they
-     * record no exported copy.
+     * record no exported copy. A row kept that way leaves the ordinals of the list: it gets the unique ordinal
+     * -(id)-1 (never -1, which means "not recorded"), so its download identity is its legacy URL alone and no listed
+     * chapter takes its position.
      */
     @Override
     public void syncChapters(@NonNull String urlBook, @NonNull List<AudioListPOJO> chapters) {
@@ -135,11 +137,20 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
             }
             for (int j = 0; j < old.size(); j++) {
                 BooksAudioEntity row = old.get(j);
-                if (!used[j] && row.localUri == null && DeletionPlanner.isRemote(row.urlAudio)) {
+                if (used[j]) continue;
+                if (row.localUri == null && DeletionPlanner.isRemote(row.urlAudio)) {
                     dao.deleteById(row.id);
+                } else if (row.ordinal != retainedOrdinal(row.id)) {
+                    row.ordinal = retainedOrdinal(row.id);
+                    dao.insert(row);
                 }
             }
         });
+    }
+
+    /** Ordinal of a row kept only for its copy: negative, unique per row and below -1. */
+    static int retainedOrdinal(int id) {
+        return -id - 1;
     }
 
     private static boolean sameName(BooksAudioEntity row, AudioListPOJO chapter) {

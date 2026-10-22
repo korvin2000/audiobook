@@ -13,10 +13,12 @@ import java.util.Map;
 /**
  * Pure identity of downloads. A progressive chapter is one download whose id and custom cache key are
  * {@code v1/<book>/chapter/<ordinal>}; an HLS stream (one URL for many chapters) is one download
- * {@code v1/<book>/stream/<n>} without a custom cache key (Media3 rejects one for HLS), shared by its chapters,
- * which keep their own clipping at playback. {@code <book>} is the canonical book URL without scheme, {@code www.},
- * trailing slash or fragment, so mirrors of one book and moved hosts give one id. Downloads made before these ids
- * keep the legacy id: the chapter URL without its query ({@link #legacyId}).
+ * {@code v1/<book>/stream/<host/path>} without a custom cache key (Media3 rejects one for HLS), shared by its
+ * chapters, which keep their own clipping at playback. A stream is named by its own host and path, not by its
+ * position, so streams added or dropped around it never renumber it. {@code <book>} is the canonical book URL
+ * without scheme, {@code www.}, trailing slash or fragment, so mirrors of one book and moved hosts give one id.
+ * Downloads made before these ids keep the legacy id: the chapter URL without its query ({@link #legacyId}); a row
+ * retained only for its exported copy (negative ordinal below -1) is identified by that legacy id alone.
  */
 public final class DownloadIds {
 
@@ -70,8 +72,48 @@ public final class DownloadIds {
         return VERSION + "/" + bookKey(bookUrl) + "/chapter/" + ordinal;
     }
 
-    public static String streamId(String bookUrl, int n) {
-        return VERSION + "/" + bookKey(bookUrl) + "/stream/" + n;
+    public static String streamId(String bookUrl, String streamUrl) {
+        return VERSION + "/" + bookKey(bookUrl) + "/stream/" + streamKey(streamUrl);
+    }
+
+    /** Lower-case host and path of a stream URL, encoded as {@link #legacyId}; query and fragment dropped. */
+    static String streamKey(String url) {
+        String clean = legacyId(url);
+        int scheme = clean.indexOf("://");
+        if (scheme < 0) return clean;
+        String rest = clean.substring(scheme + 3);
+        int slash = rest.indexOf('/');
+        String host = (slash >= 0 ? rest.substring(0, slash) : rest).toLowerCase(Locale.ROOT);
+        return host + (slash >= 0 ? rest.substring(slash) : "");
+    }
+
+    /**
+     * Whether a download stored under {@code entry.id} and requested for {@code requestUrl} holds chapter {@code url}:
+     * a chapter id always does; a stream id only when the request has the stream's host and path.
+     */
+    public static boolean holdsCurrent(Entry entry, String url, String requestUrl) {
+        return !entry.hls || streamKey(url).equals(streamKey(requestUrl));
+    }
+
+    /**
+     * Whether a download stored under {@code entry.legacyId} and requested for {@code requestUrl} holds chapter
+     * {@code url}: the same URL, or a legacy id no other chapter of the book shares.
+     */
+    public static boolean holdsLegacy(Entry entry, String url, String requestUrl) {
+        return (url != null && url.equals(requestUrl)) || !entry.legacyShared;
+    }
+
+    /**
+     * The ids under which {@code stored} (download id → request URL of each download the index holds and is not
+     * removing) keeps chapter {@code url} of {@code entry}: what that chapter owns, and nothing another chapter owns.
+     */
+    public static List<String> ownedIds(Entry entry, String url, Map<String, String> stored) {
+        List<String> owned = new ArrayList<>(2);
+        String current = entry.id.equals(entry.legacyId) ? null : stored.get(entry.id);
+        if (current != null && holdsCurrent(entry, url, current)) owned.add(entry.id);
+        String legacy = entry.legacyId.isEmpty() ? null : stored.get(entry.legacyId);
+        if (legacy != null && holdsLegacy(entry, url, legacy)) owned.add(entry.legacyId);
+        return owned;
     }
 
     /** True for ids made by {@link #chapterId}/{@link #streamId} of this book. */
@@ -90,11 +132,11 @@ public final class DownloadIds {
 
     /**
      * Downloads of the chapters of one book, aligned with {@code urls}. {@code ordinals[i]} is the chapter's recorded
-     * ordinal, or -1 to use its position {@code i}; HLS chapters map to the index of their distinct stream URL.
+     * ordinal, or -1 to use its position {@code i}; below -1 the row was retained for its copy and has its legacy id
+     * only. HLS chapters map to the stream of their URL's host and path.
      */
     public static List<Entry> forBook(String bookUrl, List<String> urls, int[] ordinals) {
         List<Entry> entries = new ArrayList<>(urls.size());
-        Map<String, Integer> streams = new HashMap<>();
         Map<String, String> legacyOwner = new HashMap<>();
         Map<String, Boolean> legacyShared = new HashMap<>();
         for (String url : urls) {
@@ -110,16 +152,13 @@ public final class DownloadIds {
             String url = urls.get(i);
             String legacy = legacyId(url);
             boolean shared = legacyShared.containsKey(legacy);
+            int recorded = ordinals != null && i < ordinals.length ? ordinals[i] : -1;
             if (isHls(url)) {
-                Integer n = streams.get(url);
-                if (n == null) {
-                    n = streams.size();
-                    streams.put(url, n);
-                }
-                entries.add(new Entry(streamId(bookUrl, n), null, true, legacy, shared));
+                entries.add(new Entry(streamId(bookUrl, url), null, true, legacy, shared));
+            } else if (recorded < -1) {
+                entries.add(new Entry(legacy, null, false, legacy, shared));
             } else {
-                int ordinal = ordinals != null && i < ordinals.length && ordinals[i] >= 0 ? ordinals[i] : i;
-                String id = chapterId(bookUrl, ordinal);
+                String id = chapterId(bookUrl, recorded >= 0 ? recorded : i);
                 entries.add(new Entry(id, id, false, legacy, shared));
             }
         }

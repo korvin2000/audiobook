@@ -313,6 +313,7 @@
     <string name="dowland_delete">Скачать/Удалить</string>
     <string name="delete_complite">Удаление завершено</string>
     <string name="delete_result">Удалено %1$d из %2$d</string>
+    <string name="remove_partial">Удалено книг: %1$d из %2$d. Не удалось удалить глав: %3$d, они остались в списке</string>
     <string name="seekTo">Перемотка</string>
     <string name="seekToPauseDesc">Снимать плеер с паузы во время перемотки</string>
     <string name="scrollToSelected">Переход к активному файлу</string>

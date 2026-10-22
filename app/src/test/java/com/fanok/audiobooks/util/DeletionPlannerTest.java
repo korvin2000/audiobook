@@ -113,8 +113,42 @@ public class DeletionPlannerTest {
         assertTrue(one.downloadIdsToRemove.isEmpty());
 
         Plan both = DeletionPlanner.plan(Arrays.asList(first, second), ROOTS, true, IDS, Collections.<String>emptySet());
-        assertEquals(set("v1/akniga.org/bulgakov-master-i-margarita/stream/0", "https://r1.akniga.club/b/111286/pl.m3u8"),
-                both.downloadIdsToRemove);
+        assertEquals(set("v1/akniga.org/bulgakov-master-i-margarita/stream/r1.akniga.club/b/111286/pl.m3u8",
+                "https://r1.akniga.club/b/111286/pl.m3u8"), both.downloadIdsToRemove);
+    }
+
+    @Test
+    public void aLegacyDownloadOnlyTheDeletedChapterOwnsIsRemovedThoughASurvivorSharesItsLegacyId() {
+        String book = "https://baza-knig.top/books/1-master/";
+        String one = "https://baza-knig.top/get.php?file=1";
+        String two = "https://baza-knig.top/get.php?file=2";
+        String legacy = "https://baza-knig.top/get.php";
+        List<com.fanok.audiobooks.download.DownloadIds.Entry> e = com.fanok.audiobooks.download.DownloadIds.forBook(
+                book, Arrays.asList(one, two), new int[]{0, 1});
+        // Only ?file=2 has a completed legacy download; chapter 1 survives, never downloaded.
+        java.util.Map<String, String> stored = Collections.singletonMap(legacy, two);
+        Set<String> kept = new HashSet<>(com.fanok.audiobooks.download.DownloadIds.ownedIds(e.get(0), one, stored));
+        Row second = new Row(book, two, null, Arrays.asList(e.get(1).id, e.get(1).legacyId));
+
+        Plan plan = DeletionPlanner.plan(Collections.singletonList(second), ROOTS, true, IDS, kept);
+
+        assertTrue(plan.downloadIdsToRemove.contains(legacy));
+    }
+
+    @Test
+    public void pruningStopsAtTheBookFoldersAndNeverReachesARootMovedDeeper() {
+        String source = ROOT + "/Akniga";
+        String book = source + "/Мастер и Маргарита";
+        String reader = book + "/Козий";
+        List<String> folders = Arrays.asList(ROOT + "/x", ROOT + "/x/y", source, book, reader);
+
+        assertEquals(3, DeletionPlanner.prunableDepth(folders, ROOTS));
+        // The download root was changed to the book folder: only the reader folder may go.
+        assertEquals(1, DeletionPlanner.prunableDepth(folders, Arrays.asList(ROOT, book + "/")));
+        assertEquals(0, DeletionPlanner.prunableDepth(folders, Collections.singletonList("file://" + reader)));
+        // A root inside the reader folder keeps every folder above it.
+        assertEquals(0, DeletionPlanner.prunableDepth(folders, Collections.singletonList(reader + "/Глава 1")));
+        assertEquals(2, DeletionPlanner.prunableDepth(Arrays.asList(book, reader), Collections.<String>emptyList()));
     }
 
     private static Row row(String urlBook, String urlAudio, String localUri) {

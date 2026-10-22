@@ -263,6 +263,8 @@ public class App extends Application {
         String source = pref.getString("sorce_books", getString(R.string.abook_value));
 
         Consts.setSOURCE(this, source);
+
+        getDownloadManager();
     }
 
 
@@ -281,11 +283,17 @@ public class App extends Application {
         return instance;
     }
 
+    /**
+     * The one download manager. Contract: it is created on the main thread (eagerly at the end of {@link #onCreate}),
+     * so its listeners and requirement watcher run on the main looper; a caller on another thread that comes first
+     * has the creation posted to the main looper and waits for it, failing with an IllegalStateException after
+     * {@link #MAIN_THREAD_WAIT_SECONDS} instead of creating it on its own thread.
+     */
     @UnstableApi
     public DownloadManager getDownloadManager() {
         DownloadManager dm = downloadManager;
         if (dm == null) {
-            createDownloadStack();
+            createDownloadStackOnMain();
             dm = downloadManager;
         }
         return dm;
@@ -294,10 +302,33 @@ public class App extends Application {
     public SimpleCache getDownloadCache() {
         SimpleCache cache = downloadCache;
         if (cache == null) {
-            createDownloadStack();
+            createDownloadStackOnMain();
             cache = downloadCache;
         }
         return cache;
+    }
+
+    private static final long MAIN_THREAD_WAIT_SECONDS = 10;
+
+    @UnstableApi
+    private void createDownloadStackOnMain() {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            createDownloadStack();
+            return;
+        }
+        java.util.concurrent.FutureTask<Void> task = new java.util.concurrent.FutureTask<>(this::createDownloadStack, null);
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(task);
+        try {
+            task.get(MAIN_THREAD_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new IllegalStateException("DownloadManager not created: the main thread did not run the creation within "
+                    + MAIN_THREAD_WAIT_SECONDS + " s", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while the main thread creates the DownloadManager", e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new IllegalStateException("DownloadManager creation failed", e.getCause());
+        }
     }
 
     /** Directory of the Media3 download store (app-specific, never the user folder or the clearable cache dir). */
@@ -328,9 +359,9 @@ public class App extends Application {
     }
 
     /**
-     * The store directory, chosen once and remembered so it never moves between runs. On first use a store left in
-     * the old place (below the download folder) is moved here when the rename is possible; otherwise its downloads
-     * keep their exported copies and stream again.
+     * The store directory, chosen once and remembered so it never moves between runs. A store left in an old place
+     * (below the download folder, or the cache-dir fallback) is moved here; the new place is remembered only once it
+     * holds the store, so after a failed move the old store stays in use and the move is retried on the next start.
      */
     private File downloadStoreDir() {
         SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(this);
@@ -338,15 +369,41 @@ public class App extends Application {
         if (saved != null) return new File(saved);
         File base = getExternalFilesDir(null);
         if (base == null) base = getFilesDir();
-        File dir = new File(base, DOWNLOAD_CACHE_DIR);
-        if (!dir.exists()) {
-            File legacy = new File(DownloadStorageHelper.getDownloadPath(this), ".audiobooks_cache");
-            if (legacy.isDirectory() && legacy.renameTo(dir)) {
-                android.util.Log.i("App", "Moved the download store to " + dir);
-            }
+        File target = new File(base, DOWNLOAD_CACHE_DIR);
+        File dir = chooseStoreDir(target, java.util.Arrays.asList(
+                new File(DownloadStorageHelper.getDownloadPath(this), ".audiobooks_cache"),
+                new File(getCacheDir(), "downloads")),
+                (from, to) -> (!to.exists() || to.delete()) && from.renameTo(to));
+        if (dir.equals(target)) {
+            pref.edit().putString(PREF_DOWNLOAD_CACHE_DIR, dir.getAbsolutePath()).apply();
+        } else {
+            android.util.Log.w("App", "Download store not moved, still using " + dir);
         }
-        pref.edit().putString(PREF_DOWNLOAD_CACHE_DIR, dir.getAbsolutePath()).apply();
         return dir;
+    }
+
+    /** Moves a store directory; true when {@code to} now holds it. */
+    interface StoreMover {
+        boolean move(File from, File to);
+    }
+
+    /**
+     * Where the download store lives: {@code target} when it already holds data or no legacy store does; else the
+     * first legacy store with data, moved into {@code target} by {@code mover}, or left where it is (and returned)
+     * when the move fails.
+     */
+    static File chooseStoreDir(File target, java.util.List<File> legacy, StoreMover mover) {
+        if (hasEntries(target)) return target;
+        for (File old : legacy) {
+            if (!hasEntries(old)) continue;
+            return mover.move(old, target) ? target : old;
+        }
+        return target;
+    }
+
+    private static boolean hasEntries(File dir) {
+        String[] names = dir.list();
+        return names != null && names.length > 0;
     }
 
     @Override

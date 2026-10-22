@@ -2,6 +2,8 @@ package com.fanok.audiobooks.net;
 
 import androidx.annotation.NonNull;
 
+import com.fanok.audiobooks.Url;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -44,7 +46,7 @@ public final class MemoryCookieJar implements CookieJar {
             for (Map.Entry<String, Cookie> e : jar.entrySet()) {
                 Cookie cookie = e.getValue();
                 if (cookie.expiresAt() < now) {
-                    jar.remove(e.getKey());
+                    dropExpired(jar, e.getKey(), cookie);
                 } else if (cookie.matches(url)) {
                     result.add(cookie);
                 }
@@ -53,12 +55,18 @@ public final class MemoryCookieJar implements CookieJar {
         return result;
     }
 
+    /** Removes the expired {@code seen} only: a cookie saved under the same key meanwhile stays. */
+    static void dropExpired(@NonNull Map<String, Cookie> jar, @NonNull String key, @NonNull Cookie seen) {
+        jar.remove(key, seen);
+    }
+
     /**
-     * A view of this jar that also sends {@code extra} (name → value) with every request whose stored cookies do not
-     * already carry that name: the immutable request context of one download or playback (e.g. a session id).
+     * A view of this jar that also sends {@code extra} (name → value) with every https request to the host of
+     * {@code server} whose stored cookies do not already carry that name: the immutable request context of one
+     * download or playback (e.g. a session id). Requests to any other host or over http never get it.
      */
     @NonNull
-    public CookieJar with(@NonNull Map<String, String> extra) {
+    public CookieJar with(@NonNull String server, @NonNull Map<String, String> extra) {
         final Map<String, String> context = Collections.unmodifiableMap(new LinkedHashMap<>(extra));
         return new CookieJar() {
             @Override
@@ -70,6 +78,7 @@ public final class MemoryCookieJar implements CookieJar {
             @Override
             public List<Cookie> loadForRequest(@NonNull HttpUrl url) {
                 List<Cookie> cookies = MemoryCookieJar.this.loadForRequest(url);
+                if (!url.isHttps() || !Url.isHost(url.toString(), server)) return cookies;
                 List<Cookie> result = new ArrayList<>(cookies);
                 for (Map.Entry<String, String> e : context.entrySet()) {
                     boolean present = false;
@@ -77,7 +86,7 @@ public final class MemoryCookieJar implements CookieJar {
                     if (!present) {
                         try {
                             result.add(new Cookie.Builder().name(e.getKey()).value(e.getValue())
-                                    .hostOnlyDomain(url.host()).build());
+                                    .hostOnlyDomain(url.host()).secure().build());
                         } catch (IllegalArgumentException invalid) {
                             // A malformed stored session value is not sent rather than failing the request.
                         }

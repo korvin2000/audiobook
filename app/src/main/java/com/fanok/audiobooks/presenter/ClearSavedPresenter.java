@@ -115,7 +115,13 @@ public class ClearSavedPresenter extends MvpPresenter<ClearSavedView> {
         getViewState().showData(downloads);
 
         if (mContext != null) {
-            DownloadStorageHelper.removeBooks(mContext, bookUrls);
+            DownloadStorageHelper.removeBooks(mContext, bookUrls, (removed, total, failed) -> {
+                if (failed > 0 && mContext != null) {
+                    android.widget.Toast.makeText(mContext, mContext.getString(R.string.remove_partial, removed, total, failed),
+                            android.widget.Toast.LENGTH_LONG).show();
+                    refresh(false);
+                }
+            });
         }
     }
 
