@@ -72,7 +72,12 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
 
     public static final String Broadcast_PLAY_PREVIOUS = "PlayPriveos";
     public static final String Broadcast_PLAY_NEXT = "PlayNext";
+    /** Toggles: the play/pause button and the PLAY_PAUSE key. */
     public static final String Broadcast_PLAY = "Play";
+    /** The PLAY key: plays, never pauses. */
+    public static final String Broadcast_RESUME = "Resume";
+    /** The PAUSE key: pauses, never plays. */
+    public static final String Broadcast_PAUSE = "Pause";
     public static final String Broadcast_SEEK_TO = "SeekTo";
     public static final String Broadcast_SEEK_NEXT_30 = "SeekToNext30";
 

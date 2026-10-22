@@ -12,9 +12,11 @@ import static com.fanok.audiobooks.activity.SleepTimerActivity.bradcast_FinishTi
 import static com.fanok.audiobooks.activity.SleepTimerActivity.bradcast_UpdateTimer;
 import static com.fanok.audiobooks.android_equalizer.EqualizerFragment.Broadcast_EqualizerEnabled;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_Equalizer;
+import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PAUSE;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_NEXT;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_PREVIOUS;
+import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_RESUME;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_SEEK_NEXT_30;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_SEEK_PREVIOUS_10;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_SEEK_TO;
@@ -107,6 +109,7 @@ import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
@@ -114,10 +117,11 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Plays one book. The user's intent ({@link #wantPlaying}) is changed only by the commands {@link #play()},
  * {@link #pause()}, {@link #toggle()}, {@link #seekTo(long)}, {@link #setSpeed(float)}, {@link #next()},
- * {@link #previous()}, {@link #select(int, boolean)} and {@link #stop()}; notification actions, media buttons,
- * session callbacks and the app's broadcasts are thin adapters over them. One {@link ExoPlayer} lives as long as
- * the service; a chapter change only replaces its media source. Every replacement and stop bumps {@link #gen},
- * and asynchronous work started for an older generation is dropped.
+ * {@link #previous()}, {@link #select(int, boolean)}, {@link #seekAndPlay(long)} and {@link #stop()}; notification
+ * actions, media buttons, session callbacks and the app's broadcasts are thin adapters over them. Every command
+ * sets the intent first; asynchronous completions read the intent as it is when they land. One {@link ExoPlayer}
+ * lives as long as the service; a chapter change only replaces its media source. Every replacement (requested,
+ * not completed) and stop bumps {@link #gen}, and asynchronous work started for an older generation is dropped.
  */
 @OptIn(markerClass = UnstableApi.class)
 public class MediaPlayerService extends MediaBrowserServiceCompat {
@@ -204,6 +208,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private final IBinder mBinder = new LocalBinder();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor();
+    /** Generation of the newest queued legacy write per kind and book; an older one queued before it is stale. */
+    private final ConcurrentHashMap<String, Integer> legacyWrites = new ConcurrentHashMap<>();
     private final PlaybackErrorPolicy errorPolicy = new PlaybackErrorPolicy();
     private final DefaultExtractorsFactory extractorsFactory =
             new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
@@ -392,7 +398,6 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         super.onDestroy();
         //1. nothing started before this point may act any more; the final position is written synchronously
         gen++;
-        running = false;
         checkpointNow(true);
 
         //2. timers, handlers, artwork
@@ -441,6 +446,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
 
         //5. the executor goes last; every submit checks isShutdown()
         dbExecutor.shutdown();
+        //only now is the teardown complete, checkpoint included
+        running = false;
     }
 
     /**
@@ -510,14 +517,18 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
 
     /** Plays the loaded book; after an error re-prepares the chapter, after the end replays the book. */
     public void play() {
+        wantPlaying = true;
         if (player == null) {
             return;
         }
         if (!hasBook()) {
-            restoreBook(null, true);
+            //the book is read from the database; its arrival plays it unless a pause came first
+            if (!restoring) {
+                restoreBook(null);
+            }
+            publishState();
             return;
         }
-        wantPlaying = true;
         int state = player.getPlaybackState();
         if (!resolving && state == Player.STATE_ENDED && chapterIndex >= chapters.size() - 1) {
             //the finished book starts over
@@ -539,7 +550,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             errorPolicy.reset();
             failedKind = null;
             if (player.getMediaItemCount() == 0) {
-                loadChapter(chapterIndex, startPositionMs, true);
+                //the chapter never loaded (invalid clip, unresolved source): load it again, never another one
+                loadChapter(chapterIndex, startPositionMs, false);
                 return;
             }
             player.prepare();
@@ -550,15 +562,15 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
 
     /** Pauses in every state; pending retries and source resolution can no longer start audio. */
     public void pause() {
-        if (player == null) {
-            return;
-        }
+        //also before the book or the player exists: a pending restore or resolution reads this when it lands
         wantPlaying = false;
         cancelRetry();
         if (pausedAt < 0) {
             pausedAt = SystemClock.elapsedRealtime();
         }
-        player.setPlayWhenReady(false);
+        if (player != null) {
+            player.setPlayWhenReady(false);
+        }
         checkpointNow(false);
         publishState();
     }
@@ -572,29 +584,48 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
     }
 
-    /** Seeks within the chapter, clamped to it; never changes the intent. */
+    /**
+     * Seeks within the chapter, clamped to it; never changes the intent. While the chapter is not loaded (its
+     * source is being resolved, or it failed to load) the seek moves where it will start.
+     */
     public void seekTo(long positionMs) {
-        if (player == null || !hasBook() || resolving) {
-            return;
-        }
-        if (!player.getCurrentTimeline().isEmpty() && !player.isCurrentMediaItemSeekable()) {
+        if (player == null || !hasBook()) {
             return;
         }
         long target = Math.max(0, positionMs);
-        long duration = player.getDuration();
-        if (duration != C.TIME_UNSET) {
-            target = Math.min(target, duration);
+        if (resolving || player.getMediaItemCount() == 0) {
+            startPositionMs = target;
+        } else {
+            if (!player.getCurrentTimeline().isEmpty() && !player.isCurrentMediaItemSeekable()) {
+                return;
+            }
+            long duration = player.getDuration();
+            if (duration != C.TIME_UNSET) {
+                target = Math.min(target, duration);
+            }
+            player.seekTo(target);
         }
-        player.seekTo(target);
         //an explicit position is not rewound after the pause
         pausedAt = -1;
         sendProgress();
         publishState();
     }
 
+    /**
+     * The "resume after seeking" preference (spec §8): the one command in which a seek also plays. Only the app's
+     * own seek bar and skip buttons use it, and only while the preference is on; binder and session seeks go to
+     * {@link #seekTo(long)}, which never changes the intent.
+     */
+    public void seekAndPlay(long positionMs) {
+        seekTo(positionMs);
+        if (!wantPlaying && hasBook()) {
+            play();
+        }
+    }
+
     private void seekBy(long deltaMs) {
-        if (player != null) {
-            seekTo(player.getCurrentPosition() + deltaMs);
+        if (player != null && hasBook()) {
+            seekTo(currentPositionMs() + deltaMs);
         }
     }
 
@@ -640,8 +671,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     public void stop() {
         wantPlaying = false;
         cancelRetry();
-        checkpointNow(false);
         gen++;
+        //on disk before the book's identity goes: onDestroy has nothing left to snapshot
+        checkpointNow(true);
         if (player != null) {
             player.setPlayWhenReady(false);
             player.stop();
@@ -756,6 +788,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private void loadChapter(int index, long positionMs, boolean freshChapter) {
         final int generation = ++gen;
         cancelRetry();
+        //the newest command wins over a book still being read from the database
+        restoring = false;
         if (freshChapter) {
             errorPolicy.reset();
         }
@@ -764,8 +798,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         startPositionMs = Math.max(0, positionMs);
         final AudioPOJO audio = chapters.get(index);
         resolving = true;
-        //the previous chapter must not go on while this one resolves
+        //the previous chapter must not go on while this one resolves, nor come back if this one fails to load:
+        //Play would prepare it under this chapter's identity (stopped first, so the empty player stays IDLE)
         player.stop();
+        player.clearMediaItems();
         checkpointNow(false);
         if (freshChapter) {
             recordChapter(audio);
@@ -828,15 +864,21 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         publishState();
     }
 
-    /** A cold start (media button, browser client) plays the last book, or the given known one, from the database. */
-    private void restoreBook(@Nullable String requestedUrl, final boolean play) {
+    /**
+     * A cold start (media button, browser client) loads the last book, or the given known one, from the database
+     * with the intent as it is when the book arrives.
+     */
+    private void restoreBook(@Nullable String requestedUrl) {
         Checkpoint last = storage.loadLastCheckpoint();
         final String url = requestedUrl != null ? requestedUrl : last != null ? last.bookUrl : null;
         if (url == null) {
+            //nothing to play: the intent cannot be honoured
+            wantPlaying = false;
             publishState();
             return;
         }
-        final int generation = gen;
+        //taken at request time, so the newest request wins and an older one still on its way is dropped
+        final int generation = ++gen;
         final Context app = getApplicationContext();
         restoring = true;
         boolean queued = execDb(() -> {
@@ -858,31 +900,51 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             } catch (RuntimeException e) {
                 Log.w(TAG, "restoreBook: cannot read the book", e);
             }
-            final BookPOJO restored = found;
+            final BookPOJO restored = found != null || list.isEmpty() ? found : knownBook(url, list.get(0));
             handler.post(() -> {
-                restoring = false;
                 if (generation != gen || player == null) {
                     return;
                 }
+                restoring = false;
                 if (list.isEmpty()) {
-                    if (hasBook()) {
-                        publishState();
-                    } else {
+                    if (!hasBook()) {
                         stop();
+                    } else if (resolving) {
+                        //this request dropped the loaded chapter's resolution: resolve it again
+                        loadChapter(chapterIndex, startPositionMs, false);
+                    } else {
+                        //the unknown book is ignored; the loaded one follows the intent the request set
+                        player.setPlayWhenReady(wantPlaying);
+                        publishState();
                     }
                     return;
                 }
                 Checkpoint checkpoint = storage.loadCheckpoint(url);
                 Checkpoint at = checkpoint != null ? checkpoint.clampTo(list.size()) : new Checkpoint(url, 0, 0);
-                apply(new Request(restored, url, list, null, at.chapterIndex, at.positionMs, play));
+                //the intent as it is now: a pause that came while the book was read wins
+                apply(new Request(restored, url, list, null, at.chapterIndex, at.positionMs, wantPlaying));
             });
         });
         if (!queued) {
             restoring = false;
         }
+        publishState();
     }
 
-    private void playFromMediaId(@Nullable String mediaId) {
+    /**
+     * A book the database knows only by its chapter rows (no saved, favorite or history entry): enough for the
+     * notification to open its screen, offline too, instead of loading the page.
+     */
+    @NonNull
+    private static BookPOJO knownBook(@NonNull String url, @NonNull AudioPOJO firstChapter) {
+        BookPOJO book = new BookPOJO();
+        book.setUrl(url);
+        book.setName(firstChapter.getBookName());
+        return book;
+    }
+
+    @VisibleForTesting
+    void playFromMediaId(@Nullable String mediaId) {
         int index = parseMediaIndex(mediaId);
         if (index >= 0) {
             select(index, true);
@@ -891,7 +953,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             if (mediaId.equals(bookUrl)) {
                 play();
             } else {
-                restoreBook(mediaId, true);
+                wantPlaying = true;
+                restoreBook(mediaId);
             }
         } else {
             Log.w(TAG, "onPlayFromMediaId: ignoring invalid media id");
@@ -1028,9 +1091,12 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (!hasBook() || player == null) {
             return null;
         }
-        long position = resolving || player.getMediaItemCount() == 0
-                ? startPositionMs : player.getCurrentPosition();
-        return new Checkpoint(bookUrl, ordinalOf(chapterIndex), position);
+        return new Checkpoint(bookUrl, ordinalOf(chapterIndex), currentPositionMs());
+    }
+
+    /** Where the chapter is: the pending start while it loads or after it failed to load. */
+    private long currentPositionMs() {
+        return resolving || player.getMediaItemCount() == 0 ? startPositionMs : player.getCurrentPosition();
     }
 
     private void checkpointNow(boolean synchronous) {
@@ -1043,13 +1109,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         //legacy book-level seconds, written for the book lists only
         final String url = checkpoint.bookUrl;
         final int seconds = (int) (checkpoint.positionMs / 1000);
-        execDb(() -> {
-            try {
-                mAudioDBModel.setTime(url, seconds);
-            } catch (RuntimeException e) {
-                Log.e(TAG, "DB setTime error", e);
-            }
-        });
+        queueLegacyWrite("time:" + url, () -> mAudioDBModel.setTime(url, seconds));
     }
 
     /** Legacy last-chapter title of the book, and the rating prompt counter, once per chapter played. */
@@ -1057,13 +1117,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         final String url = bookUrl;
         final String name = audio.getName() != null ? audio.getName() : "";
         final int seconds = (int) (startPositionMs / 1000);
-        execDb(() -> {
-            try {
-                mAudioDBModel.add(url, name);
-                mAudioDBModel.setTime(url, seconds);
-            } catch (RuntimeException e) {
-                Log.e(TAG, "DB addLastBook error", e);
-            }
+        queueLegacyWrite("chapter:" + url, () -> {
+            mAudioDBModel.add(url, name);
+            mAudioDBModel.setTime(url, seconds);
         });
         if (storage.loadShowRating()) {
             int count = storage.loadCountAudioListneredForRating() + 1;
@@ -1123,7 +1179,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (!hasBook() || player == null) {
             state = restoring ? PlaybackStateCompat.STATE_CONNECTING : PlaybackStateCompat.STATE_NONE;
         } else {
-            position = resolving ? startPositionMs : player.getCurrentPosition();
+            position = currentPositionMs();
             builder.setActiveQueueItemId(chapterIndex);
             if (isShowingError()) {
                 state = PlaybackStateCompat.STATE_ERROR;
@@ -1216,7 +1272,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
         long duration = player.getDuration();
         Intent intent = new Intent(Broadcast_SET_PROGRESS);
-        intent.putExtra("timeCurrent", (int) player.getCurrentPosition());
+        intent.putExtra("timeCurrent", (int) currentPositionMs());
         intent.putExtra("timeEnd", duration == C.TIME_UNSET ? 0 : (int) duration);
         intent.putExtra("buffered", (int) player.getBufferedPosition());
         sendInternal(intent);
@@ -1556,7 +1612,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     /** App-internal actions are never exported: other apps must not be able to drive the player. */
     private void registerCommandReceiver() {
         IntentFilter filter = new IntentFilter();
-        for (String action : new String[]{Broadcast_PLAY, Broadcast_PLAY_NEXT, Broadcast_PLAY_PREVIOUS,
+        for (String action : new String[]{Broadcast_PLAY, Broadcast_RESUME, Broadcast_PAUSE, Broadcast_PLAY_NEXT,
+                Broadcast_PLAY_PREVIOUS,
                 Broadcast_SEEK_TO, Broadcast_SEEK_NEXT_30, Broadcast_SEEK_PREVIOUS_10, Broadcast_SET_SPEED,
                 Broadcast_SHOW_TITLE, Broadcast_SleepTimer, Broadcast_UPDATE_TIMER_START, Broadcast_Equalizer,
                 Broadcast_EqualizerEnabled}) {
@@ -1573,7 +1630,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
         switch (action) {
             case Broadcast_PLAY:
+                //the app's play/pause button and the PLAY_PAUSE key
                 toggle();
+                break;
+            case Broadcast_RESUME:
+                play();
+                break;
+            case Broadcast_PAUSE:
+                pause();
                 break;
             case Broadcast_PLAY_NEXT:
                 next();
@@ -1582,16 +1646,17 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                 previous();
                 break;
             case Broadcast_SEEK_TO:
-                seekTo(intent.getIntExtra("postion", 0));
-                playIfSeekUnpauses();
+                seekFromApp(intent.getIntExtra("postion", 0));
                 break;
             case Broadcast_SEEK_NEXT_30:
-                seekBy(FAST_FORWARD);
-                playIfSeekUnpauses();
+                if (player != null && hasBook()) {
+                    seekFromApp(currentPositionMs() + FAST_FORWARD);
+                }
                 break;
             case Broadcast_SEEK_PREVIOUS_10:
-                seekBy(-REWIND);
-                playIfSeekUnpauses();
+                if (player != null && hasBook()) {
+                    seekFromApp(currentPositionMs() - REWIND);
+                }
                 break;
             case Broadcast_SET_SPEED:
                 setSpeed(intent.getFloatExtra("speed", BookPresenter.getSpeed()));
@@ -1629,16 +1694,23 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
     }
 
-    /** The "unpause while seeking" preference: an explicit play() after the seek, not part of seeking. */
-    private void playIfSeekUnpauses() {
-        if (!wantPlaying && hasBook() && mPreferences.getBoolean("seekToPausePref", true)) {
-            play();
+    /** The app's seek adapters: {@link #seekAndPlay(long)} while "resume after seeking" is on, else a plain seek. */
+    private void seekFromApp(long positionMs) {
+        if (mPreferences.getBoolean("seekToPausePref", true)) {
+            seekAndPlay(positionMs);
+        } else {
+            seekTo(positionMs);
         }
     }
 
     // ---------------------------------------------------------------------------------------------------------
     // Sleep timer
 
+    /**
+     * Arms or cancels the sleep timer. An end-of-chapter timer is a boundary on whatever chapter is current when
+     * one ENDS (spec §8): a manual next/previous/select or a book replacement re-arms it on the new chapter's end,
+     * since only {@link #onChapterEnded()} consumes it.
+     */
     private void onSleepTimerCommand(@NonNull Intent intent) {
         if (sleepTimer != null) {
             sleepTimer.cancel();
@@ -1792,6 +1864,30 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (presetReverb != null) {
             presetReverb.release();
             presetReverb = null;
+        }
+    }
+
+    /**
+     * Queues a legacy DB write taken from an immutable snapshot. It carries the generation it was taken in and is
+     * dropped when a write of the same kind for the same book from a newer generation is queued behind it.
+     */
+    private void queueLegacyWrite(@NonNull final String key, @NonNull final Runnable write) {
+        final int generation = gen;
+        legacyWrites.put(key, generation);
+        boolean queued = execDb(() -> {
+            Integer newest = legacyWrites.get(key);
+            if (newest != null && newest != generation) {
+                return;
+            }
+            legacyWrites.remove(key, generation);
+            try {
+                write.run();
+            } catch (RuntimeException e) {
+                Log.e(TAG, "legacy DB write failed", e);
+            }
+        });
+        if (!queued) {
+            legacyWrites.remove(key, generation);
         }
     }
 

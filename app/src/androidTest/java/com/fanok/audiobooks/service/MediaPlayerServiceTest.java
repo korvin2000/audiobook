@@ -3,12 +3,14 @@ package com.fanok.audiobooks.service;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -17,18 +19,26 @@ import android.os.IBinder;
 import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.view.KeyEvent;
 import androidx.media3.common.Player;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.preference.PreferenceManager;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.rule.GrantPermissionRule;
 import androidx.test.rule.ServiceTestRule;
+import com.fanok.audiobooks.Consts;
+import com.fanok.audiobooks.activity.BookActivity;
 import com.fanok.audiobooks.model.AudioDBModel;
+import com.fanok.audiobooks.model.AudioListDBModel;
+import com.fanok.audiobooks.pojo.AudioListPOJO;
 import com.fanok.audiobooks.pojo.AudioPOJO;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.presenter.BookPresenter;
+import com.fanok.audiobooks.presenter.SleepTimerPresenter;
+import java.io.File;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -49,6 +59,8 @@ import okhttp3.mockwebserver.SocketPolicy;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import okio.Buffer;
+import okio.BufferedSource;
+import okio.Okio;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -65,6 +77,9 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public class MediaPlayerServiceTest {
 
+    private static final String REWIND_PREF = "rewind_back";
+    private static final String SEEK_PLAYS_PREF = "seekToPausePref";
+
     @Rule
     public final ServiceTestRule serviceRule = ServiceTestRule.withTimeout(5, TimeUnit.SECONDS);
 
@@ -76,17 +91,26 @@ public class MediaPlayerServiceTest {
     private MockWebServer server;
     private final Map<String, byte[]> files = new ConcurrentHashMap<>();
     private final List<String> books = new ArrayList<>();
-    private final Object failuresLock = new Object();
-    private int failuresLeft;
+    /** Every response is a 503 while set. */
+    private volatile boolean failing;
     private volatile long headersDelayMs;
     private volatile boolean neverAnswer;
     private String savedLast;
+    private final Map<String, Boolean> savedSettings = new ConcurrentHashMap<>();
 
     @Before
     public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertFalse("a player service from another test is still running", awaitStopped());
         savedLast = storagePrefs().getString(Checkpoint.KEY_LAST, null);
+        //positions are asserted exactly: no rewind after a pause; the app's seeks resume (the default)
+        SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
+        for (String key : new String[]{REWIND_PREF, SEEK_PLAYS_PREF}) {
+            if (settings.contains(key)) {
+                savedSettings.put(key, settings.getBoolean(key, false));
+            }
+        }
+        settings.edit().putBoolean(REWIND_PREF, false).putBoolean(SEEK_PLAYS_PREF, true).commit();
 
         String localhost = InetAddress.getByName("localhost").getCanonicalHostName();
         HeldCertificate certificate = new HeldCertificate.Builder().addSubjectAlternativeName(localhost).build();
@@ -113,6 +137,7 @@ public class MediaPlayerServiceTest {
     @After
     public void tearDown() throws Exception {
         neverAnswer = false;
+        failing = false;
         serviceRule.unbindService();
         context.stopService(new Intent(context, MediaPlayerService.class));
         boolean stillRunning = awaitStopped();
@@ -128,9 +153,21 @@ public class MediaPlayerServiceTest {
             editor.remove(Checkpoint.KEY_LAST);
         }
         editor.commit();
+        SharedPreferences.Editor settings = PreferenceManager.getDefaultSharedPreferences(context).edit();
+        for (String key : new String[]{REWIND_PREF, SEEK_PLAYS_PREF}) {
+            Boolean saved = savedSettings.get(key);
+            if (saved != null) {
+                settings.putBoolean(key, saved);
+            } else {
+                settings.remove(key);
+            }
+        }
+        settings.commit();
         AudioDBModel legacy = new AudioDBModel(context);
+        AudioListDBModel rows = new AudioListDBModel(context);
         for (String book : books) {
             legacy.remove(book);
+            rows.remove(book);
         }
         assertFalse("the service did not stop", stillRunning);
     }
@@ -169,21 +206,41 @@ public class MediaPlayerServiceTest {
                 || player(service).getPlayWhenReady() || service.isWantPlaying()));
     }
 
+    /** The server fails until Play: only the explicit command can recover, after the retry budget is spent. */
     @Test
-    public void fourServerErrorsThenPlayRecovers() throws Exception {
-        synchronized (failuresLock) {
-            failuresLeft = 4;
-        }
+    public void exhaustedRetriesPublishTheErrorAndPlayRecovers() throws Exception {
+        failing = true;
         MediaPlayerService service = startAndBind(book("errors", 20), true);
-        await("four 503s surfaced as a player error", 10_000, () -> server.getRequestCount() >= 4
-                && player(service).getPlayerError() != null);
+        await("retry budget spent: the error is published", 40_000,
+                () -> service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_ERROR);
+        assertTrue(describe(service), onMain(service::isWantPlaying));
+        assertTrue("first attempt and two retries", server.getRequestCount() >= 3);
 
         onMain(() -> {
+            failing = false;
             service.play();
             return null;
         });
         await("playing after Play", 8_000, () -> player(service).isPlaying());
-        assertTrue(server.getRequestCount() >= 5);
+    }
+
+    @Test
+    public void pauseDuringAPendingRetryKeepsItPausedWhenTheServerRecovers() throws Exception {
+        failing = true;
+        MediaPlayerService service = startAndBind(book("retry-pause", 20), true);
+        await("first error, retry pending", 15_000, () -> player(service).getPlayerError() != null
+                && service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_BUFFERING);
+
+        sendAction(MediaPlayerService.ACTION_PAUSE);
+        await("paused", 1_500, () -> !service.isWantPlaying());
+        int requests = server.getRequestCount();
+        failing = false;
+        //past both backoff delays
+        Thread.sleep(8_000);
+
+        assertFalse(describe(service), onMain(() -> player(service).isPlaying()
+                || player(service).getPlayWhenReady() || service.isWantPlaying()));
+        assertEquals("no retry after the pause", requests, server.getRequestCount());
     }
 
     @Test
@@ -204,6 +261,48 @@ public class MediaPlayerServiceTest {
     }
 
     @Test
+    public void stopServiceWhileBufferingPersistsTheCheckpoint() throws Exception {
+        headersDelayMs = 4_000;
+        MediaPlayerService.Request request = book("stop-buffering", 20);
+        MediaPlayerService service = start(request, 5_000, true);
+        await("buffering on a held response", 5_000, () -> server.getRequestCount() >= 1
+                && player(service).getPlaybackState() == Player.STATE_BUFFERING);
+
+        serviceRule.unbindService();
+        context.stopService(new Intent(context, MediaPlayerService.class));
+        assertFalse("service destroyed", awaitStopped());
+
+        Checkpoint checkpoint = new StorageUtil(context).loadCheckpoint(request.bookUrl);
+        assertNotNull(checkpoint);
+        assertEquals(0, checkpoint.chapterIndex);
+        assertTrue("position " + checkpoint.positionMs,
+                checkpoint.positionMs >= 4_500 && checkpoint.positionMs <= 5_500);
+    }
+
+    /** The stop command (notification, dismiss) writes the position to disk before the book is let go. */
+    @Test
+    public void stopActionWritesTheCheckpointToDisk() throws Exception {
+        MediaPlayerService.Request request = book("stop-action", 20);
+        MediaPlayerService service = startAndBind(request, true);
+        await("playing past a second", 8_000,
+                () -> player(service).isPlaying() && player(service).getCurrentPosition() >= 1_000);
+
+        serviceRule.unbindService();
+        sendAction(MediaPlayerService.ACTION_STOP);
+        assertFalse("service destroyed", awaitStopped());
+
+        File file = new File(context.getApplicationInfo().dataDir, "shared_prefs/STORAGE.xml");
+        String xml;
+        try (BufferedSource source = Okio.buffer(Okio.source(file))) {
+            xml = source.readUtf8();
+        }
+        assertTrue(xml.contains("\"" + Checkpoint.key(request.bookUrl) + "\""));
+        Checkpoint checkpoint = new StorageUtil(context).loadCheckpoint(request.bookUrl);
+        assertNotNull(checkpoint);
+        assertTrue("position " + checkpoint.positionMs, checkpoint.positionMs >= 1_000);
+    }
+
+    @Test
     public void coldStartPausedAgainstASilentServerIsForegroundAtOnce() throws Exception {
         neverAnswer = true;
         MediaPlayerService.start(context, book("cold", 20));
@@ -217,16 +316,135 @@ public class MediaPlayerServiceTest {
         assertTrue(hasForegroundNotification());
     }
 
+    /** A pause that arrives while the book is still being read from the database wins over the Play before it. */
     @Test
-    public void previousOnFirstChapterThenNaturalEndContinuesToTheNextChapter() throws Exception {
-        MediaPlayerService service = startAndBind(book("chapters", 3, 3), true);
-        await("chapter 0 playing", 8_000, () -> service.getChapterIndex() == 0 && player(service).isPlaying());
+    public void pauseDuringAColdRestoreWins() throws Exception {
+        MediaPlayerService.Request known = knownBook("cold-pause", 20);
+        MediaPlayerService service = bind();
+
+        //one main-thread turn: the database read cannot land in between
+        onMain(() -> {
+            service.play();
+            service.pause();
+            return null;
+        });
+        await("book restored and ready", 8_000, () -> known.bookUrl.equals(MediaPlayerService.currentBookUrl())
+                && player(service).getPlaybackState() == Player.STATE_READY);
+        Thread.sleep(700);
+
+        assertFalse(describe(service), onMain(() -> player(service).isPlaying()
+                || player(service).getPlayWhenReady() || service.isWantPlaying()));
+    }
+
+    @Test
+    public void theNewestOfTwoBookRequestsWins() throws Exception {
+        MediaPlayerService.Request first = knownBook("newest-first", 20);
+        MediaPlayerService.Request second = knownBook("newest-second", 20);
+        MediaPlayerService service = bind();
 
         onMain(() -> {
+            service.playFromMediaId(first.bookUrl);
+            service.playFromMediaId(second.bookUrl);
+            return null;
+        });
+        await("the second book playing", 10_000,
+                () -> second.bookUrl.equals(MediaPlayerService.currentBookUrl()) && player(service).isPlaying());
+        Thread.sleep(700);
+
+        assertEquals(second.bookUrl, MediaPlayerService.currentBookUrl());
+    }
+
+    /** No saved, favorite or history entry, only chapter rows: the notification opens the book screen itself. */
+    @Test
+    public void aBookKnownByItsChapterRowsOpensItsScreenFromTheNotification() throws Exception {
+        MediaPlayerService.Request known = knownBook("rows-only", 20);
+        MediaPlayerService service = bind();
+
+        onMain(() -> {
+            service.play();
+            return null;
+        });
+        await("book restored", 8_000, () -> known.bookUrl.equals(MediaPlayerService.currentBookUrl()));
+        await("the notification opens the book screen", 5_000, () -> {
+            Notification notification = activeNotification();
+            PendingIntent bookScreen = PendingIntent.getActivity(context, 0,
+                    new Intent(context, BookActivity.class),
+                    PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+            return notification != null && notification.contentIntent != null
+                    && notification.contentIntent.equals(bookScreen);
+        });
+    }
+
+    @Test
+    public void previousOnFirstChapterRestartsItThenNaturalEndContinuesToTheNextChapter() throws Exception {
+        MediaPlayerService service = startAndBind(book("chapters", 3, 3), true);
+        await("chapter 0 playing past a second", 8_000, () -> service.getChapterIndex() == 0
+                && player(service).isPlaying() && player(service).getCurrentPosition() >= 1_000);
+
+        long restart = onMain(() -> {
+            service.previous();
+            return player(service).getCurrentPosition();
+        });
+        assertTrue("restarted at " + restart, restart < 500);
+        await("chapter 1 playing", 10_000, () -> service.getChapterIndex() == 1 && player(service).isPlaying());
+    }
+
+    /** Seeks that come while the chapter's source is resolved move where it starts; previous on chapter 0 to 0. */
+    @Test
+    public void seeksWhileTheSourceResolvesMoveWhereTheChapterStarts() throws Exception {
+        MediaPlayerService service = startAndBind(book("resolving", 20), false);
+        await("ready and paused", 8_000, () -> player(service).getPlaybackState() == Player.STATE_READY);
+
+        //one main-thread turn each: the source resolution cannot land in between
+        onMain(() -> {
+            service.select(0, true);
+            service.seekTo(8_000);
+            return null;
+        });
+        await("playing", 8_000, () -> player(service).isPlaying());
+        long started = onMain(() -> player(service).getCurrentPosition());
+        assertTrue("started at " + started, started >= 8_000);
+
+        onMain(() -> {
+            service.select(0, true);
+            service.seekTo(8_000);
             service.previous();
             return null;
         });
-        await("chapter 1 playing", 10_000, () -> service.getChapterIndex() == 1 && player(service).isPlaying());
+        await("playing again", 8_000, () -> player(service).isPlaying());
+        long restarted = onMain(() -> player(service).getCurrentPosition());
+        assertTrue("restarted at " + restarted, restarted < 4_000);
+    }
+
+    @Test
+    public void aChapterThatCannotLoadNeverPlaysThePreviousOneUnderItsName() throws Exception {
+        MediaPlayerService.Request request = book("bad-clip", 20, 20);
+        AudioPOJO bad = request.chapters.get(1);
+        bad.setTimeStart(5);
+        bad.setTimeFinish(2);
+        MediaPlayerService service = startAndBind(request, true);
+        await("chapter 0 playing past a second", 8_000, () -> service.getChapterIndex() == 0
+                && player(service).isPlaying() && player(service).getCurrentPosition() >= 1_000);
+
+        onMain(() -> {
+            service.next();
+            return null;
+        });
+        await("the chapter's error is published", 3_000, () -> service.getChapterIndex() == 1
+                && service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_ERROR);
+        onMain(() -> {
+            service.play();
+            return null;
+        });
+        Thread.sleep(1_000);
+
+        assertTrue(describe(service), onMain(() -> !player(service).isPlaying()
+                && player(service).getMediaItemCount() == 0 && service.getChapterIndex() == 1
+                && service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_ERROR));
+        Checkpoint checkpoint = new StorageUtil(context).loadCheckpoint(request.bookUrl);
+        assertNotNull(checkpoint);
+        assertEquals(1, checkpoint.chapterIndex);
+        assertEquals(0, checkpoint.positionMs);
     }
 
     @Test
@@ -243,17 +461,122 @@ public class MediaPlayerServiceTest {
                 || player(service).getPlayWhenReady() || service.isWantPlaying()));
     }
 
+    /** The activities' hardware keys: PAUSE while paused stays paused, PLAY while playing keeps playing. */
+    @Test
+    public void hardwarePlayAndPauseKeysNeverToggle() throws Exception {
+        MediaPlayerService service = startAndBind(book("keys", 20), false);
+        await("ready and paused", 8_000, () -> player(service).getPlaybackState() == Player.STATE_READY);
+
+        Consts.handleUserInput(context, KeyEvent.KEYCODE_MEDIA_PAUSE);
+        Thread.sleep(700);
+        assertFalse(describe(service), onMain(() -> player(service).isPlaying()
+                || player(service).getPlayWhenReady() || service.isWantPlaying()));
+
+        Consts.handleUserInput(context, KeyEvent.KEYCODE_MEDIA_PLAY);
+        await("playing", 3_000, () -> player(service).isPlaying());
+        Consts.handleUserInput(context, KeyEvent.KEYCODE_MEDIA_PLAY);
+        Thread.sleep(700);
+        assertTrue(describe(service), onMain(() -> player(service).isPlaying() && service.isWantPlaying()));
+
+        Consts.handleUserInput(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE);
+        await("toggled to paused", 3_000, () -> !player(service).getPlayWhenReady() && !service.isWantPlaying());
+    }
+
+    /** Binder and session seeks never change the intent; the app's seek bar resumes while the preference is on. */
+    @Test
+    public void onlyTheAppsSeekAdaptersResumeAfterSeeking() throws Exception {
+        MediaPlayerService service = startAndBind(book("seek", 20), false);
+        await("ready and paused", 8_000, () -> player(service).getPlaybackState() == Player.STATE_READY);
+
+        onMain(() -> {
+            service.seekTo(5_000);
+            return null;
+        });
+        Thread.sleep(500);
+        assertFalse(describe(service), onMain(() -> player(service).isPlaying()
+                || player(service).getPlayWhenReady() || service.isWantPlaying()));
+
+        context.sendBroadcast(new Intent(BookPresenter.Broadcast_SEEK_TO)
+                .putExtra("postion", 8_000).setPackage(context.getPackageName()));
+        await("playing after the app's seek", 3_000,
+                () -> player(service).isPlaying() && service.isWantPlaying());
+        assertTrue(onMain(() -> player(service).getCurrentPosition() >= 8_000));
+    }
+
+    /** Spec §8: an end-of-chapter timer armed on one chapter ends the chapter chosen after it. */
+    @Test
+    public void endOfChapterTimerFollowsTheCurrentChapter() throws Exception {
+        MediaPlayerService service = startAndBind(book("end-of-chapter", 20, 3, 3), true);
+        await("chapter 0 playing", 8_000, () -> service.getChapterIndex() == 0 && player(service).isPlaying());
+
+        context.sendBroadcast(new Intent(SleepTimerPresenter.Broadcast_SleepTimer).putExtra("start", true)
+                .putExtra("endOfChapter", true).setPackage(context.getPackageName()));
+        Thread.sleep(500);
+        onMain(() -> {
+            service.next();
+            return null;
+        });
+        await("chapter 1 playing", 8_000, () -> service.getChapterIndex() == 1 && player(service).isPlaying());
+        await("chapter 1 ended into a paused chapter 2", 10_000, () -> service.getChapterIndex() == 2
+                && player(service).getPlaybackState() == Player.STATE_READY);
+        Thread.sleep(500);
+
+        assertFalse(describe(service), onMain(() -> player(service).isPlaying()
+                || player(service).getPlayWhenReady() || service.isWantPlaying()));
+    }
+
+    @Test
+    public void pauseInEndedStaysPaused() throws Exception {
+        MediaPlayerService service = startAndBind(book("ended", 2), true);
+        await("ended", 10_000, () -> player(service).getPlaybackState() == Player.STATE_ENDED);
+
+        sendAction(MediaPlayerService.ACTION_PAUSE);
+        Thread.sleep(700);
+
+        assertTrue(describe(service), onMain(() -> player(service).getPlaybackState() == Player.STATE_ENDED
+                && !player(service).getPlayWhenReady() && !service.isWantPlaying()));
+        assertEquals(PlaybackStateCompat.STATE_PAUSED,
+                (int) onMain(() -> service.getSessionPlaybackState().getState()));
+    }
+
+    /** The presenter binds and unbinds with the screen: doing it while buffering must not touch playback. */
+    @Test
+    public void rebindingWhileBufferingKeepsPlaying() throws Exception {
+        headersDelayMs = 3_000;
+        MediaPlayerService service = startAndBind(book("rotate", 20), true);
+        await("buffering on a held response", 5_000, () -> server.getRequestCount() >= 1
+                && player(service).getPlaybackState() == Player.STATE_BUFFERING);
+
+        serviceRule.unbindService();
+        MediaPlayerService again = bind();
+        assertSame(service, again);
+        await("playing after the held response", 8_000, () -> player(again).isPlaying());
+        assertTrue(onMain(again::isWantPlaying));
+    }
+
+    @Test
+    public void foregroundNotificationStaysAcrossAChapterChange() throws Exception {
+        MediaPlayerService service = startAndBind(book("foreground", 20, 20), true);
+        await("chapter 0 playing", 8_000, () -> service.getChapterIndex() == 0 && player(service).isPlaying());
+        assertTrue(hasForegroundNotification());
+
+        onMain(() -> {
+            service.next();
+            return null;
+        });
+        assertTrue("foreground while the next chapter loads", hasForegroundNotification());
+        await("chapter 1 playing", 8_000, () -> service.getChapterIndex() == 1 && player(service).isPlaying());
+        assertTrue(hasForegroundNotification());
+    }
+
     // -----------------------------------------------------------------------------------------------------
 
     private MockResponse respond(RecordedRequest request) {
         if (neverAnswer) {
             return new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE);
         }
-        synchronized (failuresLock) {
-            if (failuresLeft > 0) {
-                failuresLeft--;
-                return new MockResponse().setResponseCode(503);
-            }
+        if (failing) {
+            return new MockResponse().setResponseCode(503);
         }
         byte[] wav = request.getRequestUrl() != null ? files.get(request.getRequestUrl().encodedPath()) : null;
         if (wav == null) {
@@ -315,9 +638,33 @@ public class MediaPlayerServiceTest {
         return new MediaPlayerService.Request(book, bookUrl, chapters, null, 0, 0, false);
     }
 
+    /**
+     * A book the database knows only by its chapter rows (no saved, favorite or history entry), made the last
+     * one played, so a cold Play restores it.
+     */
+    private MediaPlayerService.Request knownBook(String name, int... seconds) {
+        MediaPlayerService.Request request = book(name, seconds);
+        AudioListDBModel rows = new AudioListDBModel(context);
+        for (AudioPOJO audio : request.chapters) {
+            AudioListPOJO row = new AudioListPOJO();
+            row.setBookUrl(request.bookUrl);
+            row.setBookName(audio.getBookName());
+            row.setAudioName(audio.getName());
+            row.setAudioUrl(audio.getUrl());
+            rows.add(row);
+        }
+        new StorageUtil(context).storeCheckpoint(new Checkpoint(request.bookUrl, 0, 0), true);
+        return request;
+    }
+
     private MediaPlayerService startAndBind(MediaPlayerService.Request paused, boolean play) throws Exception {
+        return start(paused, 0, play);
+    }
+
+    private MediaPlayerService start(MediaPlayerService.Request paused, long positionMs, boolean play)
+            throws Exception {
         MediaPlayerService.start(context, new MediaPlayerService.Request(paused.book, paused.bookUrl,
-                paused.chapters, null, 0, 0, play));
+                paused.chapters, null, 0, positionMs, play));
         return bind();
     }
 
@@ -330,22 +677,26 @@ public class MediaPlayerServiceTest {
         context.startService(new Intent(context, MediaPlayerService.class).setAction(action));
     }
 
-    private boolean hasForegroundNotification() {
+    private Notification activeNotification() {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         for (StatusBarNotification notification : manager.getActiveNotifications()) {
-            if (notification.getId() == MediaPlayerService.getNotificationId()
-                    && (notification.getNotification().flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) {
-                return true;
+            if (notification.getId() == MediaPlayerService.getNotificationId()) {
+                return notification.getNotification();
             }
         }
-        return false;
+        return null;
+    }
+
+    private boolean hasForegroundNotification() {
+        Notification notification = activeNotification();
+        return notification != null && (notification.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0;
     }
 
     private SharedPreferences storagePrefs() {
         return context.getSharedPreferences("STORAGE", Context.MODE_PRIVATE);
     }
 
-    /** @return true when the service is still running after 5 s */
+    /** @return true when the service is still running after 5 s; false once its teardown has completed */
     private static boolean awaitStopped() throws InterruptedException {
         long end = SystemClock.elapsedRealtime() + 5_000;
         while (MediaPlayerService.isRunning() && SystemClock.elapsedRealtime() < end) {
