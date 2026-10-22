@@ -2,7 +2,7 @@ package com.fanok.audiobooks.pojo;
 
 import android.net.Uri;
 
-import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import com.fanok.audiobooks.Consts;
 
 public class AudioPOJO {
@@ -28,8 +28,9 @@ public class AudioPOJO {
         return name;
     }
 
-    public void setName(@NonNull String name) {
-        this.name = name;
+    /** Null is stored as "" so a nameless chapter is kept instead of failing the whole list. */
+    public void setName(@Nullable String name) {
+        this.name = name == null ? "" : name;
     }
 
     public String getUrl() {
@@ -52,11 +53,9 @@ public class AudioPOJO {
         }
     }
 
-    public void setUrl(@NonNull String url) {
-        if (url.trim().isEmpty()) {
-            return;
-        }
-        this.url = url;
+    /** Null or blank is stored as ""; callers drop chapters without a URL. */
+    public void setUrl(@Nullable String url) {
+        this.url = url == null || url.trim().isEmpty() ? "" : url;
     }
 
     public int getTime() {
