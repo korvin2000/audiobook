@@ -26,7 +26,6 @@ public class LoadBook extends AppCompatActivity {
 
     private BookPOJO mBookPOJO;
     private String mUrl;
-    private boolean mNotificationClick;
     private Context mContext;
 
     @Override
@@ -55,7 +54,7 @@ public class LoadBook extends AppCompatActivity {
             finish();
             return;
         }
-        mNotificationClick = intent.getBooleanExtra("notificationClick", false);
+        // never trusted from an intent: this activity is exported, so the PIN check always runs (SEC-05)
         if (mUrl.equals(BookActivity.getShowingView())) finish();
     }
 
@@ -104,7 +103,7 @@ public class LoadBook extends AppCompatActivity {
 
                     @Override
                     public void onComplete() {
-                        BookActivity.startNewActivity(mContext, mBookPOJO, mNotificationClick);
+                        BookActivity.startNewActivity(mContext, mBookPOJO);
                     }
                 });
     }
