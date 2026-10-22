@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Single;
 import io.reactivex.schedulers.TestScheduler;
+import io.reactivex.subjects.SingleSubject;
 
 public class SearchSessionTest {
 
@@ -209,5 +210,102 @@ public class SearchSessionTest {
         assertEquals(Arrays.asList("P1", "S1", "P2"), requested);
         assertEquals("x,y,s,z", finished.get(1));
         assertFalse(s.hasMore());
+    }
+
+    @Test
+    public void cancelMidRunLeavesNothingPendingAndTheNextRequestStartsAgain() {
+        SearchSession<String> s = session(Collections.singletonList(source("A", 5, page(true, "a1"), scheduler)));
+        s.search("1984");
+        scheduler.advanceTimeBy(2, TimeUnit.SECONDS);
+        s.dispose();
+        assertFalse(s.isRunning());
+        scheduler.advanceTimeBy(5, TimeUnit.SECONDS);
+        assertTrue(published.isEmpty());
+        assertTrue(finished.isEmpty());
+        assertTrue("the unanswered source keeps its cursor", s.hasMore());
+        assertTrue(s.loadNext());
+        scheduler.advanceTimeBy(5, TimeUnit.SECONDS);
+        assertEquals(Collections.singletonList(Arrays.asList("a1")), published);
+        assertEquals(Collections.singletonList("a1"), finished);
+    }
+
+    @Test
+    public void aLateAnswerOfTheSupersededRunAfterTheNewRunFinishedIsIgnored() {
+        final SingleSubject<ProviderPage<String>> late = SingleSubject.create();
+        SearchSession.Source<String> src = new SearchSession.Source<String>() {
+            @Override
+            public String name() {
+                return "A";
+            }
+
+            @Override
+            public Single<ProviderPage<String>> load(String query, int pageNo) {
+                return query.equals("first") ? late
+                        : Single.timer(1, TimeUnit.SECONDS, scheduler).map(t -> page(false, "new"));
+            }
+        };
+        SearchSession<String> s = session(Collections.singletonList(src));
+        s.search("first");
+        scheduler.triggerActions();
+        s.search("second");
+        scheduler.advanceTimeBy(1, TimeUnit.SECONDS);
+        assertEquals(Collections.singletonList(Arrays.asList("new")), published);
+        assertEquals(Collections.singletonList("new"), finished);
+        late.onSuccess(page(false, "old"));
+        scheduler.advanceTimeBy(10, TimeUnit.SECONDS);
+        assertEquals(Collections.singletonList(Arrays.asList("new")), published);
+        assertEquals(Collections.singletonList("new"), finished);
+        assertEquals(Arrays.asList("new"), s.items());
+        assertFalse(s.isRunning());
+    }
+
+    @Test
+    public void aSourceRepeatingItsPageIsRetiredAfterTheSecondFetch() {
+        final int[] calls = {0};
+        SearchSession.Source<String> repeating = new SearchSession.Source<String>() {
+            @Override
+            public String name() {
+                return "R";
+            }
+
+            @Override
+            public Single<ProviderPage<String>> load(String query, int pageNo) {
+                calls[0]++;
+                return Single.just(page(true, "a", "b"));
+            }
+        };
+        SearchSession<String> s = session(Collections.singletonList(repeating));
+        s.search("1984");
+        scheduler.triggerActions();
+        assertTrue(s.hasMore());
+        assertTrue(s.loadNext());
+        scheduler.triggerActions();
+        assertEquals(2, calls[0]);
+        assertFalse(s.hasMore());
+        assertFalse(s.loadNext());
+        assertEquals("a,b", finished.get(1));
+    }
+
+    @Test
+    public void aPageWhoseCardsWereAllFilteredKeepsItsSourceGoing() {
+        SearchSession.Source<String> filtered = new SearchSession.Source<String>() {
+            @Override
+            public String name() {
+                return "F";
+            }
+
+            @Override
+            public Single<ProviderPage<String>> load(String query, int pageNo) {
+                return Single.just(pageNo == 1 ? ProviderPage.<String>of(Collections.<String>emptyList(), true, 5)
+                        : page(false, "f2"));
+            }
+        };
+        SearchSession<String> s = session(Collections.singletonList(filtered));
+        s.search("1984");
+        scheduler.triggerActions();
+        assertEquals(ProviderPage.Status.OK, s.statuses().get("F"));
+        assertTrue(s.loadNext());
+        scheduler.triggerActions();
+        assertEquals("f2", finished.get(1));
     }
 }

@@ -156,6 +156,20 @@ public class BooksModelParsersTest {
     }
 
     @Test
+    public void pageWhoseCardsWereAllFilteredKeepsTheNextLink() {
+        // knigavuhe page 1 with only LitRes cards and a pager to page 2: nothing to show, but not the end
+        Document litresOnly = Jsoup.parse("<div class='pn_page_buttons'><a href='/new/1/'>1</a><a href='/new/2/'>2</a></div>"
+                + "<div id='books_list'>"
+                + "<div class='bookkitem'><span class='bookkitem_litres_icon'></span>"
+                + "<div class='bookkitem_name'><a href='/book/1/'>Paid</a></div></div>"
+                + "</div>", Url.SERVER);
+        ProviderPage<BookPOJO> page = BooksModel.parseKnigavuhe(litresOnly, Url.INDEX + "1", 1);
+        assertTrue(page.items.isEmpty());
+        assertTrue(page.hasMore);
+        assertEquals(ProviderPage.Status.OK, page.status);
+    }
+
+    @Test
     public void audiobooChallengePageYieldsNoSentinelRows() throws IOException {
         // SiteHttp turns this page into a CookesExeption (BLOCKED) before any parser sees it;
         // should it ever get through, it must still be an empty page and never a fake book

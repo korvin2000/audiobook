@@ -123,4 +123,29 @@ public class SearchUrlsTest {
         assertEquals("https://baza-knig.top/f/j.x.autor;p.title=War%20%26%20Peace"
                 + "/v.litres_buy=litres/sort=news_read/order=desc/page/2/", url);
     }
+
+    @Test
+    public void everyGeneratedUrlDecodesBackToTheOriginalQuery() {
+        String[] queries = {"1984", "Приручитель женщин-монстров", "a&b", "100%", "c++", "War & Peace", "a b+c %20"};
+        for (Provider provider : Provider.values()) {
+            for (Category category : Category.values()) {
+                for (String query : queries) {
+                    String url = SearchUrls.url(provider, category, query, 2);
+                    if (url == null) {
+                        continue;
+                    }
+                    String decoded;
+                    if (provider == Provider.BAZA_KNIG) {
+                        String path = URI.create(url).getPath();
+                        int from = path.indexOf("p.title=") + "p.title=".length();
+                        decoded = path.substring(from, path.indexOf("/v.litres_buy", from));
+                    } else {
+                        String name = provider == Provider.ABMP3 ? "text" : provider == Provider.AUDIOBOO ? "story" : "q";
+                        decoded = HttpUrl.parse(url).queryParameter(name);
+                    }
+                    assertEquals(provider + "/" + category + " -> " + url, query, decoded);
+                }
+            }
+        }
+    }
 }

@@ -34,7 +34,16 @@ public final class ProviderPage<T> {
 
     /** A successfully parsed page; an empty page is {@link Status#EMPTY} and never has more. */
     public static <T> ProviderPage<T> of(List<T> items, boolean hasMore) {
-        if (items.isEmpty()) {
+        return of(items, hasMore, items.size());
+    }
+
+    /**
+     * A successfully parsed page of {@code rawCards} cards, of which {@code items} survived the parser's
+     * filters. Only a page without any card is {@link Status#EMPTY} with no more pages; a page whose cards
+     * were all filtered out keeps the provider's own next-page evidence.
+     */
+    public static <T> ProviderPage<T> of(List<T> items, boolean hasMore, int rawCards) {
+        if (rawCards <= 0 && items.isEmpty()) {
             return new ProviderPage<>(items, false, Status.EMPTY, null);
         }
         return new ProviderPage<>(items, hasMore, Status.OK, null);
