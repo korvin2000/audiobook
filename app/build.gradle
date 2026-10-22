@@ -40,6 +40,9 @@ android {
         versionCode 95
         versionName "7.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        sourceSets {
+            androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
+        }
         vectorDrawables.useSupportLibrary = true
         signingConfig signingConfigs.release
 

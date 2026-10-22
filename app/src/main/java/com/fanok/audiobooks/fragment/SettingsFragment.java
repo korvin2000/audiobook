@@ -619,7 +619,8 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
     }
 
     private String backupResultMessage(int skipped) {
-        return getString(skipped >= 0 ? R.string.backup_created : R.string.backup_not_created);
+        if (skipped > 0) return getString(R.string.backup_created_skipped, skipped);
+        return getString(skipped == 0 ? R.string.backup_created : R.string.backup_not_created);
     }
 
     private boolean performRestoreFromStream(Context context, java.io.InputStream is) {
