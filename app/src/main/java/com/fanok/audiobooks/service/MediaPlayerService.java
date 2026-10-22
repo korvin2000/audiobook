@@ -1,8 +1,6 @@
 package com.fanok.audiobooks.service;
 
 import static android.support.v4.media.MediaBrowserCompat.MediaItem.FLAG_PLAYABLE;
-import static androidx.media3.exoplayer.DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS;
-import static androidx.media3.exoplayer.DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS;
 import static com.fanok.audiobooks.activity.BookActivity.Broadcast_SET_IMAGE;
 import static com.fanok.audiobooks.activity.BookActivity.Broadcast_SET_PROGRESS;
 import static com.fanok.audiobooks.activity.BookActivity.Broadcast_SET_SELECTION;
@@ -19,7 +17,7 @@ import static com.fanok.audiobooks.util.DownloadUtil.buildAnnotatedUri;
 import static com.fanok.audiobooks.android_equalizer.EqualizerFragment.Broadcast_EqualizerEnabled;
 
 
-import android.annotation.SuppressLint;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -59,6 +57,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.MediaBrowserServiceCompat;
 import androidx.media.session.MediaButtonReceiver;
 import androidx.media3.common.util.UnstableApi;
@@ -176,6 +175,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
 
     private PresetReverb presetReverb;
 
+    //true while startForeground() is in effect; changed only by enterForeground/leaveForeground
+    private boolean isForeground;
+
+    //latest notification artwork request, cancelled on destroy
+    private Target artworkTarget;
+
+    private final List<BroadcastReceiver> registeredReceivers = new ArrayList<>();
+
 
     private final BroadcastReceiver equalizer = new BroadcastReceiver() {
         @UnstableApi
@@ -185,7 +192,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             if (mediaPlayer != null) {
                 broadcastIntent.putExtra("id", mediaPlayer.getAudioSessionId());
             }
-            sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
         }
     };
 
@@ -271,7 +278,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             } else {
                 broadcastIntent.putExtra("timeLet", 0);
             }
-            sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
         }
     };
 
@@ -290,7 +297,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             if (audioList != null && audioIndex >= 0 && audioIndex < audioList.size()) {
                 broadcastIntent.putExtra("title", audioList.get(audioIndex).getName());
             }
-            sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
         }
     };
 
@@ -300,7 +307,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             Intent broadcastIntent = new Intent(Broadcast_SET_PROGRESS);
             broadcastIntent.putExtra("timeCurrent", resumePosition);
             broadcastIntent.putExtra("timeEnd", (int) mediaPlayer.getDuration());
-            sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
         }
     };
 
@@ -328,9 +335,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                     @Override
                     public void onTimerFinish() {
                         SleepTimerPresenter.setTimerStarted(false);
-                        sendBroadcast(new Intent(bradcast_FinishTimer));
+                        sendInternal(new Intent(bradcast_FinishTimer));
                         stopMedia();
-                        stopForeground(true);
+                        leaveForeground(true);
                         stopSelf();
                     }
 
@@ -338,7 +345,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                     public void onTimerTick(final long timeRemaining) {
                         Intent broadcastIntent = new Intent(bradcast_UpdateTimer);
                         broadcastIntent.putExtra("time", timeRemaining);
-                        sendBroadcast(broadcastIntent);
+                        sendInternal(broadcastIntent);
                     }
                 };
                 mCountDownTimer.startTimer();
@@ -360,7 +367,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             Log.d(TAG, "onReceive: closeNotPrerepred");
             if (!isPrepared()) {
                 stopMediaNotSave();
-                stopForeground(true);
+                leaveForeground(true);
                 stopSelf();
             }
         }
@@ -370,7 +377,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         public void onReceive(Context context, Intent intent) {
             if (!isPlaying()) {
                 stopMedia();
-                stopForeground(true);
+                leaveForeground(true);
                 stopSelf();
             }
         }
@@ -382,7 +389,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             if (mCountDownTimer != null) {
                 Intent broadcastIntent = new Intent(bradcast_UpdateTimer);
                 broadcastIntent.putExtra("time", mCountDownTimer.getTimeRemaining());
-                sendBroadcast(broadcastIntent);
+                sendInternal(broadcastIntent);
             }
         }
     };
@@ -405,7 +412,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         @UnstableApi
         @Override
         public void onReceive(Context context, Intent intent) {
-            buttonClick = true;
+            buttonClick = false;
             BookPresenter.resume = false;
             //Get the new media index form SharedPreferences
             audioIndex = storage.loadAudioIndex();
@@ -419,7 +426,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
 
             //A PLAY_NEW_AUDIO action received
             //reset mediaPlayer to play the new Audio
-            stopMediaNotSave();
+            stopMediaNotSave(false);
             initMediaPlayer();
             updateMetaData();
             buildNotification(PlaybackStatus.PLAYING);
@@ -429,24 +436,21 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         @UnstableApi
         @Override
         public void onReceive(Context context, Intent intent) {
-            buttonClick = true;
-            skipToPrevious();
-            updateMetaData();
+            skipByUser(false);
         }
     };
     private final BroadcastReceiver playNext = new BroadcastReceiver() {
         @UnstableApi
         @Override
         public void onReceive(Context context, Intent intent) {
-            buttonClick = true;
-            skipToNext();
-            updateMetaData();
+            skipByUser(true);
         }
     };
     private final BroadcastReceiver play = new BroadcastReceiver() {
         @UnstableApi
         @Override
         public void onReceive(Context context, Intent intent) {
+            buttonClick = false;
             if (isPlaying()) {
                 pauseMedia();
             } else if (mediaPlayer != null) {
@@ -464,6 +468,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     private final BroadcastReceiver seekTo = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            buttonClick = false;
             boolean b = mPreferences.getBoolean("seekToPausePref", true);
             if (b) {
                 resumeMedia();
@@ -474,12 +479,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     private final BroadcastReceiver seekToNext30Sec = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            buttonClick = false;
             fastForward(FAST_FORWARD);
         }
     };
     private final BroadcastReceiver seekToPrevious10Sec = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            buttonClick = false;
             rewind(REWIND);
         }
     };
@@ -487,9 +494,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         @Override
         public void onReceive(Context context, Intent intent) {
             if (mediaPlayer != null) {
-                resumeMedia();
-                PlaybackParameters param = new PlaybackParameters(BookPresenter.getSpeed());
-                mediaPlayer.setPlaybackParameters(param);
+                //speed only: never resume or otherwise touch playWhenReady
+                mediaPlayer.setPlaybackParameters(new PlaybackParameters(currentSpeed()));
             }
         }
     };
@@ -537,42 +543,88 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     @Override
     public void onDestroy() {
         super.onDestroy();
-        try {
-            dbExecutor.shutdown();
-        } catch (Exception ignored) {}
+        //1. nothing may call back into a dying service: timer, handlers, artwork request
         SleepTimerPresenter.setTimerStarted(false);
-        stopMedia();
-        removeNotification();
-        removeAudioFocus();
-        stopEqualizer();
-        if(mAudioDBModel!=null){
-            mAudioDBModel.closeDB();
+        if (mCountDownTimer != null) {
+            mCountDownTimer.cancel();
+            mCountDownTimer = null;
+        }
+        handler1.removeCallbacksAndMessages(null);
+        handler2.removeCallbacksAndMessages(null);
+        if (artworkTarget != null) {
+            Picasso.get().cancelRequest(artworkTarget);
+            artworkTarget = null;
         }
 
-        //unregister BroadcastReceivers
-        try{
-            unregisterReceiver(becomingNoisyReceiver);
-            unregisterReceiver(playNewAudio);
-            unregisterReceiver(playPriveos);
-            unregisterReceiver(playNext);
-            unregisterReceiver(play);
-            unregisterReceiver(seekTo);
-            unregisterReceiver(seekToNext30Sec);
-            unregisterReceiver(seekToPrevious10Sec);
-            unregisterReceiver(showTitle);
-            unregisterReceiver(getPosition);
-            unregisterReceiver(setSpeed);
-            unregisterReceiver(closeNotPrerepred);
-            unregisterReceiver(closeIfPause);
-            unregisterReceiver(sleepTimer);
-            unregisterReceiver(getTimeLeft);
-            unregisterReceiver(updateTimer);
-            unregisterReceiver(equalizer);
-            unregisterReceiver(equalizerEnabled);
-        } catch (Exception ignored){
-
+        //2. unregister BroadcastReceivers, each on its own
+        for (BroadcastReceiver receiver : registeredReceivers) {
+            try {
+                unregisterReceiver(receiver);
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "receiver was not registered", e);
+            }
         }
+        registeredReceivers.clear();
 
+        try {
+            //3. persist the position synchronously, while nothing else can race it
+            savePositionNow();
+
+            //4. session, then the player and everything attached to it
+            if (mediaSession != null) {
+                try {
+                    mediaSession.release();
+                } catch (RuntimeException e) {
+                    Log.e(TAG, "mediaSession.release failed", e);
+                }
+                mediaSession = null;
+            }
+            ExoPlayer player = mediaPlayer;
+            mediaPlayer = null;
+            isPlay = false;
+            if (player != null) {
+                try {
+                    player.release();
+                } catch (RuntimeException e) {
+                    Log.e(TAG, "player.release failed", e);
+                }
+            }
+            removeNotification();
+            removeAudioFocus();
+            stopEqualizer();
+            if (mAudioDBModel != null) {
+                mAudioDBModel.closeDB();
+            }
+        } finally {
+            //5. the executor goes last: nothing above may submit to a shut down executor
+            dbExecutor.shutdown();
+        }
+    }
+
+    private void savePositionNow() {
+        if (mediaPlayer == null || mAudioDBModel == null || urlBook == null) {
+            return;
+        }
+        try {
+            mAudioDBModel.setTime(urlBook, (int) (mediaPlayer.getCurrentPosition() / 1000));
+        } catch (Exception e) {
+            Log.e(TAG, "DB setTime error", e);
+        }
+    }
+
+    private void sendInternal(Intent intent) {
+        intent.setPackage(getPackageName());
+        sendBroadcast(intent);
+    }
+
+    private void execDb(Runnable task) {
+        if (!dbExecutor.isShutdown()) {
+            dbExecutor.execute(task);
+        }
+    }
+
+    private static float currentSpeed() {
+        return PlaybackSettings.clampSpeed(BookPresenter.getSpeed());
     }
 
     public boolean isPlaying() {
@@ -642,6 +694,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     @Override
     public BrowserRoot onGetRoot(@NonNull final String clientPackageName, final int clientUid,
             @Nullable final Bundle rootHints) {
+        if (clientPackageName.isEmpty()) {
+            return null;
+        }
         return new MediaBrowserServiceCompat.BrowserRoot(MY_MEDIA_ROOT_ID, null);
     }
 
@@ -666,6 +721,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     @UnstableApi
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        //startForegroundService() requires this within seconds, whatever the start reason
+        startForegroundPreparing();
 
         storage = new StorageUtil(getApplicationContext());
 
@@ -722,6 +779,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         //Handle Intent action from MediaSession.TransportControls
         handleIncomingActions(intent);
         MediaButtonReceiver.handleIntent(mediaSession, intent);
+        if (mediaPlayer == null && isForeground && activeAudio != null) {
+            //nothing to play: do not stay foreground on the placeholder notification
+            buildNotification(PlaybackStatus.PAUSED);
+        }
         return START_NOT_STICKY;
     }
 
@@ -734,7 +795,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     }
 
     private void addLastBookToDB(String name) {
-        dbExecutor.execute(() -> {
+        execDb(() -> {
             try {
                 if (mAudioDBModel == null) {
                     mAudioDBModel = new AudioDBModel(this);
@@ -750,8 +811,6 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     }
 
     private void buildNotification(PlaybackStatus playbackStatus) {
-        stopForeground(false);
-
         int notificationAction = R.drawable.ic_notification_pause;//needs to be initialized
         PendingIntent play_pauseAction = null;
         float playbackSpeed = 0f;
@@ -762,29 +821,20 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             broadcastIntent.putExtra("id", R.drawable.ic_pause);
             //create the pause action
             play_pauseAction = playbackAction(1);
-            playbackSpeed = BookPresenter.getSpeed();
+            playbackSpeed = currentSpeed();
         } else if (playbackStatus == PlaybackStatus.PAUSED) {
             notificationAction = R.drawable.ic_notification_play;
             broadcastIntent.putExtra("id", R.drawable.ic_play);
             //create the play action
             play_pauseAction = playbackAction(0);
         }
-        this.sendBroadcast(broadcastIntent);
+        sendInternal(broadcastIntent);
 
         // I removed one of the semi-colons in the next line of code
         NotificationManager notificationManager = (NotificationManager) this.getSystemService(
                 Context.NOTIFICATION_SERVICE);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // I would suggest that you use IMPORTANCE_DEFAULT instead of IMPORTANCE_HIGH
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_LOW);
-            channel.enableVibration(true);
-            channel.setLightColor(Color.BLUE);
-            channel.enableLights(true);
-            channel.setShowBadge(true);
-            Objects.requireNonNull(notificationManager).createNotificationChannel(channel);
-        }
+        createNotificationChannel();
 
         Intent intent = new Intent(this, LoadBook.class);
         intent.putExtra("url", urlBook);
@@ -837,16 +887,18 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         }
 
         if (playbackStatus == PlaybackStatus.PLAYING) {
-            try {
-                if (VERSION.SDK_INT >= VERSION_CODES.Q) {
-                    startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-                } else {
-                    startForeground(NOTIFICATION_ID, notificationBuilder.build());
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "ForegroundServiceStartNotAllowedException on startForeground", e);
-                if (notificationManager != null) {
-                    notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
+            if (isForeground) {
+                //e.g. a chapter change: keep foreground status, only update the notification
+                Objects.requireNonNull(notificationManager).notify(NOTIFICATION_ID,
+                        notificationBuilder.build());
+            } else {
+                try {
+                    enterForeground(notificationBuilder.build());
+                } catch (IllegalStateException e) {
+                    //resuming from a pause while in the background can be refused by the platform
+                    Log.e(TAG, "startForeground refused on resume", e);
+                    Objects.requireNonNull(notificationManager).notify(NOTIFICATION_ID,
+                            notificationBuilder.build());
                 }
             }
 
@@ -856,13 +908,13 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             PendingIntent onDismissPendingIntent = PendingIntent.getBroadcast(
                     this.getApplicationContext(), 0, onCancelIntent, PendingIntent.FLAG_IMMUTABLE);
             notificationBuilder.setDeleteIntent(onDismissPendingIntent);
-            stopForeground(false);
+            leaveForeground(false);
             Objects.requireNonNull(notificationManager).notify(NOTIFICATION_ID,
                     notificationBuilder.build());
         }
 
         if (image == null && !imageUrl.isEmpty()) {
-            Picasso.get().load(imageUrl).into(new Target() {
+            artworkTarget = new Target() {
                 @Override
                 public void onBitmapFailed(Exception e, Drawable errorDrawable) {
                     image = null;
@@ -882,9 +934,57 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                 public void onPrepareLoad(Drawable placeHolderDrawable) {
 
                 }
-            });
+            };
+            Picasso.get().load(imageUrl).into(artworkTarget);
         }
 
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager notificationManager = (NotificationManager) getSystemService(
+                    Context.NOTIFICATION_SERVICE);
+            // I would suggest that you use IMPORTANCE_DEFAULT instead of IMPORTANCE_HIGH
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_LOW);
+            channel.enableVibration(true);
+            channel.setLightColor(Color.BLUE);
+            channel.enableLights(true);
+            channel.setShowBadge(true);
+            Objects.requireNonNull(notificationManager).createNotificationChannel(channel);
+        }
+    }
+
+    private void enterForeground(Notification notification) {
+        if (VERSION.SDK_INT >= VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
+        isForeground = true;
+    }
+
+    private void leaveForeground(boolean removeNotification) {
+        stopForeground(removeNotification);
+        isForeground = false;
+    }
+
+    /**
+     * Satisfies the startForegroundService() contract immediately; buildNotification() replaces
+     * this placeholder once the real state is known. Nothing to do while already foreground.
+     */
+    private void startForegroundPreparing() {
+        if (isForeground) {
+            return;
+        }
+        createNotificationChannel();
+        enterForeground(new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_headset)
+                .setContentTitle(getString(R.string.app_name))
+                .setContentText(getString(R.string.loading))
+                .setOngoing(true)
+                .build());
     }
 
     @UnstableApi
@@ -961,10 +1061,11 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
 
         DefaultLoadControl.Builder builder = new
                 DefaultLoadControl.Builder();
-        int loadControlBufferMs = Integer.parseInt(mPreferences.getString("bufferSize", "60"));
-        loadControlBufferMs *= 1000;
-        builder.setBufferDurationsMs(loadControlBufferMs, loadControlBufferMs,
-                DEFAULT_BUFFER_FOR_PLAYBACK_MS, DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS);
+        PlaybackSettings.BufferDurations buffer = PlaybackSettings.bufferDurations(
+                mPreferences.getString("bufferSize", String.valueOf(PlaybackSettings.DEFAULT_BUFFER_SECONDS)));
+        builder.setBufferDurationsMs(buffer.minBufferMs, buffer.maxBufferMs,
+                buffer.bufferForPlaybackMs, buffer.bufferForPlaybackAfterRebufferMs);
+        builder.setBackBuffer(PlaybackSettings.BACK_BUFFER_MS, true);
 
         androidx.media3.extractor.DefaultExtractorsFactory extractorsFactory =
                 new androidx.media3.extractor.DefaultExtractorsFactory()
@@ -994,14 +1095,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             @Override
             public void onPlaybackStateChanged(final int playbackState) {
                 if (playbackState == Player.STATE_ENDED) {
-                    if (!buttonClick) {
-                        skipToNext();
-                        updateMetaData();
-                    } else {
-                        stopMedia();
-                        stopSelf();
-                    }
+                    //every chapter end is treated alike: next chapter, and skipToNext stops after the last
                     buttonClick = false;
+                    skipToNext();
+                    updateMetaData();
                 }
 
                 if(mediaPlayer!=null) {
@@ -1073,8 +1170,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                 .build();
         mediaPlayer.setAudioAttributes(audioAttributes, false);
 
-        PlaybackParameters param = new PlaybackParameters(BookPresenter.getSpeed());
-        mediaPlayer.setPlaybackParameters(param);
+        mediaPlayer.setPlaybackParameters(new PlaybackParameters(currentSpeed()));
 
 
         mediaPlayer.setPlayWhenReady(true);
@@ -1085,7 +1181,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             if (countAudioListnered >= countAudioWereShowingRatingPopUp) {
                 storage.storeCountAudioListneredForRating(0);
                 Intent broadcastIntent = new Intent(Broadcast_SHOW_RATING);
-                sendBroadcast(broadcastIntent);
+                sendInternal(broadcastIntent);
             } else {
                 storage.storeCountAudioListneredForRating(countAudioListnered);
             }
@@ -1137,12 +1233,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             @Override
             public void onPlay() {
                 super.onPlay();
+                buttonClick = false;
                 resumeMedia();
             }
 
             @Override
             public void onPause() {
                 super.onPause();
+                buttonClick = false;
                 if (isPlaying()) {
                     pauseMedia();
                 } else {
@@ -1154,18 +1252,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             @Override
             public void onSkipToNext() {
                 super.onSkipToNext();
-                buttonClick = true;
-                skipToNext();
-                updateMetaData();
+                skipByUser(true);
             }
 
             @UnstableApi
             @Override
             public void onSkipToPrevious() {
                 super.onSkipToPrevious();
-                buttonClick = true;
-                skipToPrevious();
-                updateMetaData();
+                skipByUser(false);
             }
 
             @Override
@@ -1173,7 +1267,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                 super.onStop();
                 //Stop the service
                 pauseMedia();
-                stopForeground(false);
+                leaveForeground(false);
                 removeNotification();
                 stopSelf();
             }
@@ -1181,18 +1275,21 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             @Override
             public void onSeekTo(long position) {
                 super.onSeekTo(position);
+                buttonClick = false;
                 seekTo(position);
             }
 
             @Override
             public void onRewind() {
                 super.onRewind();
+                buttonClick = false;
                 rewind(REWIND);
             }
 
             @Override
             public void onFastForward() {
                 super.onFastForward();
+                buttonClick = false;
                 fastForward(FAST_FORWARD);
             }
 
@@ -1200,17 +1297,24 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             @Override
             public void onPlayFromMediaId(final String mediaId, final Bundle extras) {
                 super.onPlayFromMediaId(mediaId, extras);
-                audioIndex = Integer.parseInt(mediaId);
+                //the id comes from an arbitrary client: onLoadChildren hands out chapter indexes only
+                int index = parseMediaIndex(mediaId);
+                if (index < 0) {
+                    Log.w(TAG, "onPlayFromMediaId: ignoring invalid media id");
+                    return;
+                }
+                buttonClick = false;
+                audioIndex = index;
                 activeAudio = audioList.get(audioIndex);
                 storage.storeAudioIndex(audioIndex);
 
-                stopMediaNotSave();
+                stopMediaNotSave(false);
                 initMediaPlayer();
                 sendBroadcastItemSelected(audioIndex);
                 addLastBookToDB(audioList.get(audioIndex).getName());
                 Intent broadcastIntent = new Intent(Broadcast_SET_TITLE);
                 broadcastIntent.putExtra("title", audioList.get(audioIndex).getName());
-                sendBroadcast(broadcastIntent);
+                sendInternal(broadcastIntent);
                 buildNotification(PlaybackStatus.PLAYING);
                 Log.d(TAG, "onPlayFromMediaId: calld");
             }
@@ -1229,45 +1333,31 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         }
     }
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerAllBroadcast() {
-        if (VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
-            registerReceiver(playNewAudio, new IntentFilter(BookActivity.Broadcast_PLAY_NEW_AUDIO), RECEIVER_EXPORTED);
-            registerReceiver(playPriveos, new IntentFilter(BookPresenter.Broadcast_PLAY_PREVIOUS), RECEIVER_EXPORTED);
-            registerReceiver(playNext, new IntentFilter(BookPresenter.Broadcast_PLAY_NEXT), RECEIVER_EXPORTED);
-            registerReceiver(play, new IntentFilter(BookPresenter.Broadcast_PLAY), RECEIVER_EXPORTED);
-            registerReceiver(seekTo, new IntentFilter(BookPresenter.Broadcast_SEEK_TO), RECEIVER_EXPORTED);
-            registerReceiver(seekToNext30Sec, new IntentFilter(BookPresenter.Broadcast_SEEK_NEXT_30), RECEIVER_EXPORTED);
-            registerReceiver(seekToPrevious10Sec, new IntentFilter(BookPresenter.Broadcast_SEEK_PREVIOUS_10), RECEIVER_EXPORTED);
-            registerReceiver(showTitle, new IntentFilter(BookPresenter.Broadcast_SHOW_TITLE), RECEIVER_EXPORTED);
-            registerReceiver(getPosition, new IntentFilter(BookPresenter.Broadcast_GET_POSITION), RECEIVER_EXPORTED);
-            registerReceiver(setSpeed, new IntentFilter(BookPresenter.Broadcast_SET_SPEED), RECEIVER_EXPORTED);
-            registerReceiver(closeNotPrerepred, new IntentFilter(BookPresenter.Broadcast_CloseNotPrepered), RECEIVER_EXPORTED);
-            registerReceiver(closeIfPause, new IntentFilter(Broadcast_CloseIfPause), RECEIVER_EXPORTED);
-            registerReceiver(sleepTimer, new IntentFilter(SleepTimerPresenter.Broadcast_SleepTimer), RECEIVER_EXPORTED);
-            registerReceiver(getTimeLeft, new IntentFilter(Broadcast_GET_TIME_LEFT), RECEIVER_EXPORTED);
-            registerReceiver(updateTimer, new IntentFilter(Broadcast_UPDATE_TIMER_START), RECEIVER_EXPORTED);
-            registerReceiver(equalizer, new IntentFilter(Broadcast_Equalizer), RECEIVER_EXPORTED);
-            registerReceiver(equalizerEnabled, new IntentFilter(Broadcast_EqualizerEnabled), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(playNewAudio, new IntentFilter(BookActivity.Broadcast_PLAY_NEW_AUDIO));
-            registerReceiver(playPriveos, new IntentFilter(BookPresenter.Broadcast_PLAY_PREVIOUS));
-            registerReceiver(playNext, new IntentFilter(BookPresenter.Broadcast_PLAY_NEXT));
-            registerReceiver(play, new IntentFilter(BookPresenter.Broadcast_PLAY));
-            registerReceiver(seekTo, new IntentFilter(BookPresenter.Broadcast_SEEK_TO));
-            registerReceiver(seekToNext30Sec, new IntentFilter(BookPresenter.Broadcast_SEEK_NEXT_30));
-            registerReceiver(seekToPrevious10Sec, new IntentFilter(BookPresenter.Broadcast_SEEK_PREVIOUS_10));
-            registerReceiver(showTitle, new IntentFilter(BookPresenter.Broadcast_SHOW_TITLE));
-            registerReceiver(getPosition, new IntentFilter(BookPresenter.Broadcast_GET_POSITION));
-            registerReceiver(setSpeed, new IntentFilter(BookPresenter.Broadcast_SET_SPEED));
-            registerReceiver(closeNotPrerepred, new IntentFilter(BookPresenter.Broadcast_CloseNotPrepered));
-            registerReceiver(closeIfPause, new IntentFilter(Broadcast_CloseIfPause));
-            registerReceiver(sleepTimer, new IntentFilter(SleepTimerPresenter.Broadcast_SleepTimer));
-            registerReceiver(getTimeLeft, new IntentFilter(Broadcast_GET_TIME_LEFT));
-            registerReceiver(updateTimer, new IntentFilter(Broadcast_UPDATE_TIMER_START));
-            registerReceiver(equalizer, new IntentFilter(Broadcast_Equalizer));
-            registerReceiver(equalizerEnabled, new IntentFilter(Broadcast_EqualizerEnabled));
-        }
+        registerInternal(playNewAudio, BookActivity.Broadcast_PLAY_NEW_AUDIO);
+        registerInternal(playPriveos, BookPresenter.Broadcast_PLAY_PREVIOUS);
+        registerInternal(playNext, BookPresenter.Broadcast_PLAY_NEXT);
+        registerInternal(play, BookPresenter.Broadcast_PLAY);
+        registerInternal(seekTo, BookPresenter.Broadcast_SEEK_TO);
+        registerInternal(seekToNext30Sec, BookPresenter.Broadcast_SEEK_NEXT_30);
+        registerInternal(seekToPrevious10Sec, BookPresenter.Broadcast_SEEK_PREVIOUS_10);
+        registerInternal(showTitle, BookPresenter.Broadcast_SHOW_TITLE);
+        registerInternal(getPosition, BookPresenter.Broadcast_GET_POSITION);
+        registerInternal(setSpeed, BookPresenter.Broadcast_SET_SPEED);
+        registerInternal(closeNotPrerepred, BookPresenter.Broadcast_CloseNotPrepered);
+        registerInternal(closeIfPause, Broadcast_CloseIfPause);
+        registerInternal(sleepTimer, SleepTimerPresenter.Broadcast_SleepTimer);
+        registerInternal(getTimeLeft, Broadcast_GET_TIME_LEFT);
+        registerInternal(updateTimer, Broadcast_UPDATE_TIMER_START);
+        registerInternal(equalizer, Broadcast_Equalizer);
+        registerInternal(equalizerEnabled, Broadcast_EqualizerEnabled);
+    }
+
+    /** App-internal actions are never exported: other apps must not be able to drive the player. */
+    private void registerInternal(BroadcastReceiver receiver, String action) {
+        ContextCompat.registerReceiver(this, receiver, new IntentFilter(action),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+        registeredReceivers.add(receiver);
     }
 
     private boolean removeAudioFocus() {
@@ -1317,6 +1407,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         //register after getting audio focus
         IntentFilter intentFilter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
         registerReceiver(becomingNoisyReceiver, intentFilter);
+        registeredReceivers.add(becomingNoisyReceiver);
     }
 
     /**
@@ -1329,6 +1420,35 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                 AudioManager.AUDIOFOCUS_GAIN);
         return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
 
+    }
+
+    /** User-initiated chapter change: buttonClick is only meaningful during the call, never left set. */
+    @UnstableApi
+    private void skipByUser(boolean next) {
+        buttonClick = true;
+        try {
+            if (next) {
+                skipToNext();
+            } else {
+                skipToPrevious();
+            }
+            updateMetaData();
+        } finally {
+            buttonClick = false;
+        }
+    }
+
+    /** @return the chapter index for a client-supplied media id, or -1 when it is not a valid one. */
+    private int parseMediaIndex(@Nullable String mediaId) {
+        if (mediaId == null || mediaId.isEmpty() || audioList == null) {
+            return -1;
+        }
+        try {
+            int index = Integer.parseInt(mediaId);
+            return index >= 0 && index < audioList.size() ? index : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     @UnstableApi
@@ -1345,13 +1465,13 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             activeAudio = audioList.get(++audioIndex);
             storage.storeAudioIndex(audioIndex);
 
-            stopMediaNotSave();
+            stopMediaNotSave(false);
             initMediaPlayer();
             sendBroadcastItemSelected(audioIndex);
             addLastBookToDB(audioList.get(audioIndex).getName());
             Intent broadcastIntent = new Intent(Broadcast_SET_TITLE);
             broadcastIntent.putExtra("title", audioList.get(audioIndex).getName());
-            this.sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
             buildNotification(PlaybackStatus.PLAYING);
             Log.d(TAG, "skipToNext: calld");
         }
@@ -1366,13 +1486,13 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         if (audioIndex != 0) {
             activeAudio = audioList.get(--audioIndex);
             storage.storeAudioIndex(audioIndex);
-            stopMediaNotSave();
+            stopMediaNotSave(false);
             initMediaPlayer();
             sendBroadcastItemSelected(audioIndex);
             addLastBookToDB(audioList.get(audioIndex).getName());
             Intent broadcastIntent = new Intent(Broadcast_SET_TITLE);
             broadcastIntent.putExtra("title", audioList.get(audioIndex).getName());
-            this.sendBroadcast(broadcastIntent);
+            sendInternal(broadcastIntent);
             buildNotification(PlaybackStatus.PLAYING);
         }
     }
@@ -1384,7 +1504,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         resumePosition = (int) mediaPlayer.getCurrentPosition();
         int time = resumePosition / 1000;
         timeStart = time;
-        dbExecutor.execute(() -> {
+        execDb(() -> {
             try {
                 if (mAudioDBModel != null) {
                     mAudioDBModel.setTime(urlBook, time);
@@ -1399,6 +1519,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
     }
 
     private void stopMediaNotSave() {
+        stopMediaNotSave(true);
+    }
+
+    /**
+     * @param updateNotification false when a new chapter follows at once: the PLAYING notification
+     *                           replaces this one and the service must not leave the foreground between chapters
+     */
+    private void stopMediaNotSave(boolean updateNotification) {
         removeAudioFocus();
         if (mediaPlayer == null) {
             return;
@@ -1409,7 +1537,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         mediaPlayer = null;
         mediaSession.setActive(false);
         BookPresenter.resume = false;
-        buildNotification(PlaybackStatus.PAUSED);
+        if (updateNotification) {
+            buildNotification(PlaybackStatus.PAUSED);
+        }
     }
 
     private void updateMetaData() {
@@ -1499,7 +1629,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                 broadcastIntent.putExtra("timeCurrent", (int) mediaPlayer.getCurrentPosition());
                 broadcastIntent.putExtra("timeEnd", (int) mediaPlayer.getDuration());
                 broadcastIntent.putExtra("buffered", (int) mediaPlayer.getBufferedPosition());
-                this.sendBroadcast(broadcastIntent);
+                sendInternal(broadcastIntent);
 
                 if (isPlaying()) {
                     Runnable notification = new Runnable() {
@@ -1521,7 +1651,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
             if (isPrepared()) {
                 if (isPlaying()) {
                     int time = (int) (mediaPlayer.getCurrentPosition() / 1000);
-                    dbExecutor.execute(new Runnable() {
+                    execDb(new Runnable() {
                         @Override
                         public void run() {
                             try {
@@ -1559,7 +1689,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
                         Intent broadcastIntent = new Intent(Broadcast_SET_PROGRESS);
                         broadcastIntent.putExtra("timeCurrent", (int) mediaPlayer.getCurrentPosition());
                         broadcastIntent.putExtra("timeEnd", (int) mediaPlayer.getDuration());
-                        this.sendBroadcast(broadcastIntent);
+                        sendInternal(broadcastIntent);
                     }
                 }
             }
@@ -1576,7 +1706,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat implements Aud
         if (audioList != null && id >= 0 && id < audioList.size()) {
             broadcastIntent.putExtra("name", audioList.get(id).getName());
         }
-        sendBroadcast(broadcastIntent);
+        sendInternal(broadcastIntent);
     }
 
     /**

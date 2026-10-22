@@ -52,6 +52,7 @@ import com.fanok.audiobooks.pojo.OtherArtistPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.service.ExoDownloadService;
 import com.fanok.audiobooks.service.MediaPlayerService;
+import com.fanok.audiobooks.service.PlaybackSettings;
 import com.fanok.audiobooks.util.DownloadUtil;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
@@ -121,7 +122,10 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
 
     private Throwable mLastError = null;
 
-    private ServiceConnection serviceConnection;
+    private final ServiceConnection serviceConnection;
+
+    //the context the service was bound through; unbinding must use the very same one
+    private Context bindContext;
 
     private Context mContext;
 
@@ -163,7 +167,6 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
 
             @Override
             public void onServiceDisconnected(ComponentName name) {
-                serviceConnection = null;
                 serviceBound = false;
             }
         };
@@ -174,7 +177,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
     }
 
     public static void setSpeedWithoutBroadcast(float value) {
-        speed = value;
+        speed = PlaybackSettings.clampSpeed(value);
     }
 
     public static float getSpeed() {
@@ -182,6 +185,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
     }
 
     private void setSpeed(float value) {
+        value = PlaybackSettings.clampSpeed(value);
         speed = value;
         new StorageUtil(mContext).storeSpeed(value);
         Intent intent = new Intent(Broadcast_SET_SPEED);
@@ -221,10 +225,8 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
 
     @Override
     public void onStop() {
-        if (serviceBound) {
-            getViewState().myUnbindService(serviceConnection);
-        }
-
+        //the service binding is released in unbindPlayerService() when the screen is really finished:
+        //unbinding on every stop (rotation, opening another screen) would release a paused player
     }
 
     @Override
@@ -306,6 +308,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         mBooksDBModel.closeDB();
         if (mContext != null) {
             Intent broadcastIntent = new Intent(Broadcast_CloseNotPrepered);
+            broadcastIntent.setPackage(mContext.getPackageName());
             mContext.sendBroadcast(broadcastIntent);
         }
         super.onDestroy();
@@ -451,7 +454,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         // Button OK
         popDialog.setPositiveButton("OK",
                 (dialog, which) -> {
-                    float s = Float.parseFloat(textView.getText().toString());
+                    float s = PlaybackSettings.clampSpeed(Float.parseFloat(textView.getText().toString()));
                     if (s != speed) {
                         setSpeed(s);
                     }
@@ -806,6 +809,31 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         });
     }
 
+    /** Binds through the application context; {@link #unbindPlayerService()} releases it through the same one. */
+    private void bindPlayerService(Intent playerIntent) {
+        if (bindContext != null) {
+            return; //already bound: a single binding, released exactly once
+        }
+        Context app = mContext.getApplicationContext();
+        app.bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+        bindContext = app;
+    }
+
+    /** Releases the binding made by {@link #playAudio}; safe to call any number of times. */
+    public void unbindPlayerService() {
+        Context app = bindContext;
+        if (app == null) {
+            return;
+        }
+        bindContext = null;
+        serviceBound = false;
+        try {
+            app.unbindService(serviceConnection);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "service was not bound", e);
+        }
+    }
+
     private void playAudio(int audioIndex, int timeStart) {
         if (mAudioPOJO != null && mAudioPOJO.size() > audioIndex && mAudioPOJO.get(audioIndex).getUrl().isEmpty()) {
             getViewState().showToast(mAudioPOJO.get(audioIndex).getName());
@@ -820,37 +848,21 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
             storage.storeTimeStart(timeStart);
             Intent playerIntent = new Intent(mContext, MediaPlayerService.class);
             playerIntent.setAction("start");
-            if (serviceConnection != null) {
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        mContext.startForegroundService(playerIntent);
-                    } else {
-                        mContext.startService(playerIntent);
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to startForegroundService, fallback to startService", e);
-                    try {
-                        mContext.startService(playerIntent);
-                    } catch (Exception ex) {
-                        Log.e(TAG, "Failed startService fallback", ex);
-                    }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    mContext.startForegroundService(playerIntent);
+                } else {
+                    mContext.startService(playerIntent);
                 }
-                mContext.bindService(playerIntent, serviceConnection, Context.BIND_AUTO_CREATE);
-            } else {
-                serviceConnection = new ServiceConnection() {
-                    @Override
-                    public void onServiceConnected(ComponentName name, IBinder service) {
-                        serviceBound = true;
-                    }
-
-                    @Override
-                    public void onServiceDisconnected(ComponentName name) {
-                        serviceConnection = null;
-                        serviceBound = false;
-                    }
-                };
-                playAudio(audioIndex, timeStart);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to startForegroundService, fallback to startService", e);
+                try {
+                    mContext.startService(playerIntent);
+                } catch (Exception ex) {
+                    Log.e(TAG, "Failed startService fallback", ex);
+                }
             }
+            bindPlayerService(playerIntent);
         } else {
             Intent broadcastIntent = new Intent(Broadcast_PLAY_NEW_AUDIO);
             getViewState().broadcastSend(broadcastIntent);

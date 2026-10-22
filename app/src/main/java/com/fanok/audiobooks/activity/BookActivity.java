@@ -357,7 +357,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
     }
 
     @UnstableApi
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -439,44 +438,13 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         }
 
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(setImage, new IntentFilter(Broadcast_SET_IMAGE), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(setImage, new IntentFilter(Broadcast_SET_IMAGE));
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(setProgress, new IntentFilter(Broadcast_SET_PROGRESS), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(setProgress, new IntentFilter(Broadcast_SET_PROGRESS));
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(setSelectionBroadcast, new IntentFilter(Broadcast_SET_SELECTION), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(setSelectionBroadcast, new IntentFilter(Broadcast_SET_SELECTION));
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(setTitleBroadcast, new IntentFilter(Broadcast_SET_TITLE), RECEIVER_EXPORTED);
-        }else{
-            registerReceiver(setTitleBroadcast, new IntentFilter(Broadcast_SET_TITLE));
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(showRating, new IntentFilter(Broadcast_SHOW_RATING), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(showRating, new IntentFilter(Broadcast_SHOW_RATING));
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(updateAdapter, new IntentFilter(Broadcast_UPDATE_ADAPTER), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(updateAdapter, new IntentFilter(Broadcast_UPDATE_ADAPTER));
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(showEqualizer, new IntentFilter(Broadcast_SHOW_EQUALIZER), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(showEqualizer, new IntentFilter(Broadcast_SHOW_EQUALIZER));
-        }
+        registerInternalReceiver(setImage, Broadcast_SET_IMAGE);
+        registerInternalReceiver(setProgress, Broadcast_SET_PROGRESS);
+        registerInternalReceiver(setSelectionBroadcast, Broadcast_SET_SELECTION);
+        registerInternalReceiver(setTitleBroadcast, Broadcast_SET_TITLE);
+        registerInternalReceiver(showRating, Broadcast_SHOW_RATING);
+        registerInternalReceiver(updateAdapter, Broadcast_UPDATE_ADAPTER);
+        registerInternalReceiver(showEqualizer, Broadcast_SHOW_EQUALIZER);
 
 
 
@@ -965,6 +933,12 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         super.onStop();
     }
 
+    /** App-internal actions are never exported: other apps must not be able to feed or read the player UI. */
+    private void registerInternalReceiver(BroadcastReceiver receiver, String action) {
+        ContextCompat.registerReceiver(this, receiver, new IntentFilter(action),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
     @Override
     protected void onDestroy() {
         unregisterReceiver(setImage);
@@ -976,6 +950,10 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         unregisterReceiver(showEqualizer);
         showingView = "";
         mPresenter.onDestroy();
+        if (!isChangingConfigurations()) {
+            //the presenter outlives a rotation (the player keeps its binding); release it for good otherwise
+            mPresenter.unbindPlayerService();
+        }
         super.onDestroy();
     }
 
@@ -1202,6 +1180,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     @Override
     public void broadcastSend(@NotNull Intent intent) {
+        intent.setPackage(getPackageName());
         sendBroadcast(intent);
     }
 
@@ -1212,11 +1191,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     @Override
     public void myUnbindService(@NotNull ServiceConnection serviceConnection) {
-        try {
-            unbindService(serviceConnection);
-        } catch (Exception ignored) {
-        }
-
+        //the presenter binds through the application context and unbinds itself (unbindPlayerService)
     }
 
     @Override
