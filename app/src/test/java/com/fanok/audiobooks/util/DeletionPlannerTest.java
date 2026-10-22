@@ -100,6 +100,23 @@ public class DeletionPlannerTest {
         assertNull(DeletionPlanner.enclosingRoot("/storage/emulated/0/Music/1.mp3", roots));
     }
 
+    @Test
+    public void aStreamSharedWithAKeptChapterIsRemovedOnlyWithTheLastOfThem() {
+        String hls = "https://r1.akniga.club/b/111286/pl.m3u8?res=abc";
+        List<com.fanok.audiobooks.download.DownloadIds.Entry> e = com.fanok.audiobooks.download.DownloadIds.forBook(
+                AKNIGA, Arrays.asList(hls, hls), new int[]{0, 1});
+        Row first = new Row(AKNIGA, hls, null, Arrays.asList(e.get(0).id, e.get(0).legacyId));
+        Row second = new Row(AKNIGA, hls, null, Arrays.asList(e.get(1).id, e.get(1).legacyId));
+
+        Plan one = DeletionPlanner.plan(Collections.singletonList(first), ROOTS, true, IDS,
+                DeletionPlanner.idsOf(Collections.singletonList(second), IDS));
+        assertTrue(one.downloadIdsToRemove.isEmpty());
+
+        Plan both = DeletionPlanner.plan(Arrays.asList(first, second), ROOTS, true, IDS, Collections.<String>emptySet());
+        assertEquals(set("v1/akniga.org/bulgakov-master-i-margarita/stream/0", "https://r1.akniga.club/b/111286/pl.m3u8"),
+                both.downloadIdsToRemove);
+    }
+
     private static Row row(String urlBook, String urlAudio, String localUri) {
         return new Row(urlBook, urlAudio, localUri);
     }

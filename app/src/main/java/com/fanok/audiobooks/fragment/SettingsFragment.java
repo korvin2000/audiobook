@@ -42,7 +42,6 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
-import com.fanok.audiobooks.App;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.MySuggestionProvider;
 import com.fanok.audiobooks.R;
@@ -474,7 +473,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 }
             } else if (which == 1) {
                 DownloadStorageHelper.resetToDefault(context);
-                App.getInstance().reinitDownloadManagerAsync();
                 Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                 if (pref != null) {
                     pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -504,7 +502,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                             dir.mkdirs();
                         }
                         DownloadStorageHelper.saveDownloadPath(context, selected.path);
-                        App.getInstance().reinitDownloadManagerAsync();
                         Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                         if (pref != null) {
                             pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -533,7 +530,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                             dir.mkdirs();
                         }
                         DownloadStorageHelper.saveDownloadPath(context, path);
-                        App.getInstance().reinitDownloadManagerAsync();
                         Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                         if (pref != null) {
                             pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -554,7 +550,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                         Context context = getContext();
                         if (context != null) {
                             DownloadStorageHelper.saveDownloadUri(context.getApplicationContext(), result.getData());
-                            App.getInstance().reinitDownloadManagerAsync();
                             Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                             if (pref != null) {
                                 pref.setSummary(DownloadStorageHelper.getDownloadPath(context));

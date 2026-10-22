@@ -2,13 +2,15 @@ package com.fanok.audiobooks.util;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Pure plan for deleting chapter rows. A row owns at most two things: the Media3 download whose id derives from
- * its remote {@code url_audio}, and the exported copy named exactly by its {@code local_uri}. Nothing else is ever
+ * Pure plan for deleting chapter rows. A row owns at most two things: the Media3 download(s) of its remote
+ * {@code url_audio} (its {@code DownloadIds} entry; a stream download shared with other chapters only while no other
+ * kept row needs it), and the exported copy named exactly by its {@code local_uri}. Nothing else is ever
  * planned for deletion: no name matches, no folders, and no files of imported books (their {@code url_audio} is the
  * user's own file, so removing them from the library removes rows only).
  */
@@ -23,11 +25,18 @@ public final class DeletionPlanner {
         public final String urlBook;
         public final String urlAudio;
         public final String localUri;
+        /** Every Media3 download id the chapter may be stored under; null to derive one from url_audio. */
+        public final List<String> downloadIds;
 
         public Row(String urlBook, String urlAudio, String localUri) {
+            this(urlBook, urlAudio, localUri, null);
+        }
+
+        public Row(String urlBook, String urlAudio, String localUri, List<String> downloadIds) {
             this.urlBook = urlBook;
             this.urlAudio = urlAudio;
             this.localUri = localUri;
+            this.downloadIds = downloadIds;
         }
     }
 
@@ -49,11 +58,19 @@ public final class DeletionPlanner {
      * @param roots          configured download roots; a recorded URI equal to a root is never deleted.
      */
     public static Plan plan(Collection<Row> rows, Collection<String> roots, boolean keepOnlineRows, DownloadIds ids) {
+        return plan(rows, roots, keepOnlineRows, ids, Collections.<String>emptySet());
+    }
+
+    /**
+     * @param keptIds download ids still needed by rows that are not being deleted (see {@link #idsOf}): one HLS stream
+     *                download serves several chapters and is removed only with the last of them.
+     */
+    public static Plan plan(Collection<Row> rows, Collection<String> roots, boolean keepOnlineRows, DownloadIds ids,
+                            Collection<String> keptIds) {
         Plan plan = new Plan();
         for (Row row : rows) {
-            if (isRemote(row.urlAudio)) {
-                String id = ids.of(row.urlAudio);
-                if (!isEmpty(id)) plan.downloadIdsToRemove.add(id);
+            for (String id : idsOf(row, ids)) {
+                if (!keptIds.contains(id)) plan.downloadIdsToRemove.add(id);
             }
             boolean hasCopy = !isEmpty(row.localUri) && !isRoot(row.localUri, roots);
             if (hasCopy) plan.urisToDelete.add(row.localUri);
@@ -64,6 +81,28 @@ public final class DeletionPlanner {
             }
         }
         return plan;
+    }
+
+    /** The download ids of a remote row: its recorded ones, else the one derived from url_audio; none when local. */
+    public static List<String> idsOf(Row row, DownloadIds ids) {
+        List<String> result = new ArrayList<>();
+        if (!isRemote(row.urlAudio)) return result;
+        if (row.downloadIds != null) {
+            for (String id : row.downloadIds) {
+                if (!isEmpty(id)) result.add(id);
+            }
+        } else {
+            String id = ids.of(row.urlAudio);
+            if (!isEmpty(id)) result.add(id);
+        }
+        return result;
+    }
+
+    /** The download ids of all {@code rows}. */
+    public static Set<String> idsOf(Collection<Row> rows, DownloadIds ids) {
+        Set<String> result = new LinkedHashSet<>();
+        for (Row row : rows) result.addAll(idsOf(row, ids));
+        return result;
     }
 
     public static boolean isRemote(String url) {

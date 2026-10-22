@@ -3,178 +3,178 @@ package com.fanok.audiobooks.model;
 
 import android.content.Context;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadIndex;
 
-import com.fanok.audiobooks.R;
-import com.fanok.audiobooks.Url;
-import com.fanok.audiobooks.pojo.AudioListPOJO;
+import com.fanok.audiobooks.download.DownloadIds;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.DownloadItem;
+import com.fanok.audiobooks.room.BooksAudioEntity;
+import com.fanok.audiobooks.util.DeletionPlanner;
+import com.fanok.audiobooks.util.DownloadStorageHelper;
 import com.fanok.audiobooks.util.DownloadUtil;
 import java.util.ArrayList;
-import io.reactivex.Observable;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+/** Builds the Downloads screen: one row per book, from the Saved list, the chapter rows and the Media3 index. */
 public class ClearSavedModel {
 
     private final BooksDBModel mBooksDBModel;
     private final AudioListDBModel mAudioListDBModel;
-    private Context mContext;
 
 
     public ClearSavedModel(Context mContext) {
         mBooksDBModel = new BooksDBModel(mContext);
         mAudioListDBModel = new AudioListDBModel(mContext);
-        this.mContext = mContext;
     }
 
+    /** One book being assembled: its saved row or download data, and its downloads. */
+    private static final class Group {
+        String bookUrl;
+        BookPOJO book;
+        final Map<String, Download> downloads = new LinkedHashMap<>();
+    }
+
+    /**
+     * A fresh immutable snapshot of every book with a download, an exported copy or a Saved row. Call off the main
+     * thread; nothing shared is mutated.
+     */
     @UnstableApi
-    public Observable<ArrayList<DownloadItem>> getAllSaved() {
-        return Observable.create(observableEmitter -> {
-            ArrayList<DownloadItem> downloadItems = new ArrayList<>();
-            java.util.HashSet<String> addedUrls = new java.util.HashSet<>();
+    @NonNull
+    public List<DownloadItem> loadSnapshot() throws java.io.IOException {
+        Map<String, Download> byId = new HashMap<>();
+        Map<String, Group> groups = new LinkedHashMap<>();
+        ArrayList<BookPOJO> savedBooks = mBooksDBModel.getAllSaved();
+        if (savedBooks != null) {
+            for (BookPOJO book : savedBooks) {
+                if (book.getUrl() == null || book.getUrl().isEmpty()) continue;
+                Group group = group(groups, book.getUrl());
+                group.book = book;
+                group.bookUrl = book.getUrl();
+            }
+        }
+        DownloadIndex index = DownloadUtil.getDownloadManager().getDownloadIndex();
+        try (DownloadCursor cursor = index.getDownloads()) {
+            while (cursor.moveToNext()) {
+                Download d = cursor.getDownload();
+                if (d.state == Download.STATE_REMOVING) continue;
+                byId.put(d.request.id, d);
+                BookPOJO book = DownloadUtil.bookOf(d.request);
+                String bookUrl = DownloadUtil.bookUrlOf(d.request);
+                Group group = group(groups, bookUrl != null ? bookUrl : d.request.id);
+                if (group.book == null) group.book = book;
+                group.downloads.put(d.request.id, d);
+            }
+        }
+        List<DownloadItem> items = new ArrayList<>();
+        for (Group group : groups.values()) {
+            if (group.book == null) group.book = mBooksDBModel.getSomewhere(group.bookUrl);
+            items.add(aggregate(group, mAudioListDBModel.getRows(group.bookUrl), byId));
+        }
+        return Collections.unmodifiableList(items);
+    }
 
-            try {
-                ArrayList<BookPOJO> savedBooks = mBooksDBModel.getAllSaved();
-                if (savedBooks != null) {
-                    for (BookPOJO book : savedBooks) {
-                        if (book.getUrl() == null || book.getUrl().isEmpty()) continue;
-                        DownloadItem item = new DownloadItem(book.getUrl(), Download.STATE_COMPLETED);
-                        item.setBookName(book.getName());
-                        item.setChapterName(book.getName());
-                        item.setAuthor(book.getAutor());
-                        item.setReader(book.getArtist());
-                        item.setFileIcon(book.getPhoto());
-                        item.setSource(com.fanok.audiobooks.util.DownloadStorageHelper.getSourceName(book.getUrl()));
-                        item.setProgress(100);
-                        downloadItems.add(item);
-                        addedUrls.add(book.getUrl());
-                    }
+    @NonNull
+    private static Group group(@NonNull Map<String, Group> groups, @NonNull String bookUrl) {
+        String key = DownloadIds.bookKey(bookUrl);
+        Group group = groups.get(key);
+        if (group == null) {
+            group = new Group();
+            group.bookUrl = bookUrl;
+            groups.put(key, group);
+        }
+        return group;
+    }
+
+    /** The book's state from all of its chapters; without chapter rows, from its downloads alone. */
+    @UnstableApi
+    @NonNull
+    private static DownloadItem aggregate(@NonNull Group g, @NonNull List<BooksAudioEntity> rows,
+                                          @NonNull Map<String, Download> byId) {
+        int completed = 0;
+        int selected = 0;
+        int total;
+        int active = 0;
+        int queued = 0;
+        int failed = 0;
+        int stopped = 0;
+        float partial = 0;
+        List<Integer> exported = new ArrayList<>();
+        List<Download> pending = new ArrayList<>();
+        if (!rows.isEmpty()) {
+            total = rows.size();
+            List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(g.bookUrl, rows);
+            for (int i = 0; i < rows.size(); i++) {
+                BooksAudioEntity row = rows.get(i);
+                if (row.localUri != null) exported.add(row.ordinal >= 0 ? row.ordinal + 1 : i + 1);
+                boolean remote = DeletionPlanner.isRemote(row.urlAudio);
+                Download d = remote ? DownloadUtil.find(byId, entries.get(i), row.urlAudio) : null;
+                if (row.localUri != null || !remote || (d != null && d.state == Download.STATE_COMPLETED)) {
+                    completed++;
+                    selected++;
+                } else if (d != null) {
+                    selected++;
+                    pending.add(d);
                 }
-            } catch (Exception e) {
-                android.util.Log.e("ClearSavedModel", "Failed to load saved books from Room DB", e);
             }
-
-            try {
-                DownloadIndex index = DownloadUtil.getDownloadManager().getDownloadIndex();
-                if (index != null) {
-                    try (DownloadCursor cursor = index.getDownloads()) {
-                        while (cursor.moveToNext()) {
-                            Download d = cursor.getDownload();
-                            String ref = d.request.uri != null ? d.request.uri.getQueryParameter("__ref") : null;
-                            if (ref != null) {
-                                if (ref.contains("%2F") || ref.contains("%3A")) {
-                                    ref = android.net.Uri.decode(ref);
-                                }
-                                if (!ref.startsWith("http://") && !ref.startsWith("https://")) {
-                                    ref = "https://" + ref;
-                                }
-                            }
-                            String urlKey = ref != null ? ref : d.request.id;
-
-                            if (!addedUrls.contains(urlKey) && !addedUrls.contains(d.request.id)) {
-                                DownloadItem item = new DownloadItem(urlKey, d.state);
-                                int progress = 0;
-                                if (d.getPercentDownloaded() != C.PERCENTAGE_UNSET) {
-                                    progress = Math.max(0, Math.min(100, Math.round(d.getPercentDownloaded())));
-                                } else if (d.contentLength > 0) {
-                                    progress = (int) Math.round(100.0 * d.getBytesDownloaded() / (double) d.contentLength);
-                                    progress = Math.max(0, Math.min(100, progress));
-                                }
-                                item.setProgress(progress);
-
-                                if (ref != null) {
-                                    AudioListPOJO audioListPOJO = mAudioListDBModel.get(ref, d.request.id);
-                                    if (audioListPOJO.getBookUrl() != null && audioListPOJO.getBookUrl().equals(ref)) {
-                                        item.setBookName(audioListPOJO.getBookName());
-                                        item.setChapterName(audioListPOJO.getAudioName());
-                                    }
-                                    BookPOJO bookPOJO = mBooksDBModel.getSomewhere(ref);
-                                    if (bookPOJO != null) {
-                                        item.setAuthor(bookPOJO.getAutor());
-                                        item.setFileIcon(bookPOJO.getPhoto());
-                                        item.setReader(bookPOJO.getArtist());
-                                        if (item.getBookName() == null || item.getBookName().isEmpty()) {
-                                            item.setBookName(bookPOJO.getName());
-                                        }
-                                    }
-                                }
-                                downloadItems.add(item);
-                                addedUrls.add(urlKey);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                android.util.Log.w("ClearSavedModel", "ExoPlayer index query skipped", e);
+        } else {
+            total = g.downloads.size();
+            for (Download d : g.downloads.values()) {
+                selected++;
+                if (d.state == Download.STATE_COMPLETED) completed++;
+                else pending.add(d);
             }
-
-            if (!observableEmitter.isDisposed()) {
-                observableEmitter.onNext(downloadItems);
-                observableEmitter.onComplete();
+        }
+        for (Download d : pending) {
+            switch (d.state) {
+                case Download.STATE_DOWNLOADING:
+                case Download.STATE_RESTARTING:
+                    active++;
+                    break;
+                case Download.STATE_QUEUED:
+                    queued++;
+                    break;
+                case Download.STATE_FAILED:
+                    failed++;
+                    break;
+                case Download.STATE_STOPPED:
+                    stopped++;
+                    break;
+                default:
+                    break;
             }
-        });
+            if (d.getPercentDownloaded() != C.PERCENTAGE_UNSET) partial += Math.max(0, d.getPercentDownloaded()) / 100f;
+        }
+        int status = failed > 0 ? Download.STATE_FAILED
+                : active > 0 ? Download.STATE_DOWNLOADING
+                : queued > 0 ? Download.STATE_QUEUED
+                : stopped > 0 ? Download.STATE_STOPPED
+                : Download.STATE_COMPLETED;
+        int progress = total > 0 ? Math.max(0, Math.min(100, Math.round(100f * (completed + partial) / total))) : 0;
+        BookPOJO book = g.book;
+        String source = DeletionPlanner.isImportedBook(g.bookUrl) ? "Локально" : DownloadStorageHelper.getSourceName(g.bookUrl);
+        return new DownloadItem(DownloadIds.bookKey(g.bookUrl), g.bookUrl,
+                book != null ? book.getPhoto() : null, book != null ? book.getName() : nameOf(rows),
+                book != null ? book.getAutor() : null, book != null ? book.getArtist() : null, source,
+                status, progress, completed, selected, total, new ArrayList<>(g.downloads.keySet()), exported);
+    }
+
+    @Nullable
+    private static String nameOf(@NonNull List<BooksAudioEntity> rows) {
+        return rows.isEmpty() ? null : rows.get(0).booksName;
     }
 
     public void closeDB() {
         mBooksDBModel.closeDB();
         mAudioListDBModel.closeDB();
-        mContext = null;
-    }
-
-
-    @UnstableApi
-    public DownloadItem buildDownloadItem(Download newDownload) {
-        DownloadItem item = new DownloadItem(newDownload.request.id, newDownload.state);
-        item.setProgress((int) newDownload.getPercentDownloaded());
-        String ref = newDownload.request.uri.getQueryParameter("__ref");
-        if (ref!=null){
-            if (ref.contains("%2F") || ref.contains("%3A")) {
-                ref = android.net.Uri.decode(ref);
-            }
-            if (!ref.startsWith("http://") && !ref.startsWith("https://")) {
-                ref = "https://" + ref;
-            }
-            AudioListPOJO audioListPOJO = mAudioListDBModel.get(ref, newDownload.request.id);
-            if (audioListPOJO.getBookUrl()!=null && audioListPOJO.getBookUrl().equals(ref)){
-                item.setBookName(audioListPOJO.getBookName());
-                item.setChapterName(audioListPOJO.getAudioName());
-            }
-            if (ref.contains(Url.SERVER)) {
-                item.setSource(mContext.getString(R.string.kniga_v_uhe));
-            } else if (ref.contains(Url.SERVER_IZIBUK)) {
-                item.setSource(mContext.getString(R.string.izibuc));
-            } else if (ref.contains(Url.SERVER_ABMP3)) {
-                item.setSource(mContext.getString(R.string.audionook_mp3));
-            } else if (ref.contains(Url.SERVER_AKNIGA)) {
-                item.setSource(mContext.getString(R.string.abook));
-            } else if (ref.contains(Url.SERVER_BAZA_KNIG)) {
-                item.setSource(mContext.getString(R.string.baza_knig));
-            } else if (ref.contains(Url.SERVER_KNIGOBLUD)) {
-                item.setSource(mContext.getString(R.string.knigoblud));
-            } else if (ref.contains(Url.SERVER_OTRUB)) {
-                item.setSource(mContext.getString(R.string.otrub));
-            } else if (ref.contains(Url.SERVER_POLEKNIG)) {
-                item.setSource(mContext.getString(R.string.poleknig));
-            } else {
-                item.setSource("");
-            }
-            BookPOJO bookPOJO = mBooksDBModel.getSomewhere(ref);
-            if (bookPOJO!=null){
-                item.setAuthor(bookPOJO.getAutor());
-                item.setFileIcon(bookPOJO.getPhoto());
-                item.setReader(bookPOJO.getArtist());
-                if (item.getBookName()==null||item.getBookName().isEmpty()){
-                    item.setBookName(bookPOJO.getName());
-                }
-            }
-            if (ref.contains(Url.SERVER_AKNIGA)){
-                item.setChapterName(item.getBookName());
-            }
-        }
-        return item;
     }
 }
