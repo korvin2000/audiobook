@@ -387,8 +387,9 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
 
     @SuppressLint("NotifyDataSetChanged")
     public void setItem(ArrayList<BookPOJO> newModel) {
-        mModel = newModel;
-        preloadStatuses(newModel);
+        // a copy: the presenter keeps appending to its own list, the adapter must not see that
+        mModel = newModel == null ? new ArrayList<>() : new ArrayList<>(newModel);
+        preloadStatuses(mModel);
         notifyDataSetChanged();
     }
 
