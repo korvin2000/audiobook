@@ -33,12 +33,11 @@
 -keep class * extends com.bumptech.glide.module.AppGlideModule
 -keep class com.bumptech.glide.GeneratedAppGlideModuleImpl { *; }
 
-# js-evaluator (Rhino wrapper, uses reflection)
+# js-evaluator (WebView JavaScript bridge, uses reflection)
 -keep class com.evgenii.jsevaluator.** { *; }
 
-# Fix for org.mozilla:rhino missing classes
--dontwarn java.beans.**
--dontwarn java.awt.**
--dontwarn jdk.dynalink.**
--dontwarn org.mozilla.javascript.**
--keep class org.mozilla.javascript.** { *; }
+# Release builds drop debug/verbose logging (search queries, URLs).
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+}

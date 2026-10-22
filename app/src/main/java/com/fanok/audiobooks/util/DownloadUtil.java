@@ -11,6 +11,7 @@ import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSource;
@@ -62,7 +63,7 @@ import java.util.concurrent.Executors;
  * download or playback carries the same immutable book context (Referer, session cookie) through a factory scoped to
  * that request, so HLS playlists, segments and keys get it as well as the top-level URL.
  */
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class DownloadUtil {
 
     private static final String TAG = "DownloadUtil";
@@ -73,12 +74,12 @@ public class DownloadUtil {
     /** Off-main bookkeeping of the download listener and the download actions; one thread for the process. */
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     public static DownloadManager getDownloadManager() {
         return App.getInstance().getDownloadManager();
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     public static Cache getDownloadCache() {
         return App.getInstance().getDownloadCache();
     }

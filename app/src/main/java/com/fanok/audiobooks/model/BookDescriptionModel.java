@@ -2,6 +2,7 @@ package com.fanok.audiobooks.model;
 
 import static com.fanok.audiobooks.pojo.BookPOJO.absUrl;
 
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 
 import com.fanok.audiobooks.App;
@@ -64,7 +65,7 @@ public class BookDescriptionModel implements DescriptionModel {
         mPage = null;
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public Observable<ArrayList<BookPOJO>> getBooks() {
         return Single.defer(this::page)
@@ -72,7 +73,7 @@ public class BookDescriptionModel implements DescriptionModel {
                 .toObservable();
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public Observable<DescriptionPOJO> getDescription() {
         return Single.defer(this::page)
@@ -144,7 +145,7 @@ public class BookDescriptionModel implements DescriptionModel {
     }
 
     /** Network step after parsing: whether the site has other narrations; best effort, never fails the load. */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private DescriptionPOJO withOtherReader(DescriptionPOJO description) {
         String title = description.getTitle();
         String autor = description.getAutor();

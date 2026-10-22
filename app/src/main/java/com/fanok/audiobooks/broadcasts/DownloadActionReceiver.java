@@ -11,6 +11,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresPermission;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.media3.common.util.Log;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadCursor;
@@ -39,7 +40,7 @@ public class DownloadActionReceiver extends BroadcastReceiver {
 
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override public void onReceive(Context c, Intent i) {
         final PendingResult result = goAsync();
         final Context app = c.getApplicationContext();
@@ -56,7 +57,7 @@ public class DownloadActionReceiver extends BroadcastReceiver {
     }
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private void handle(Context c, Intent i) throws IOException {
         String a = i.getAction();
         DownloadIndex idx = DownloadUtil.getDownloadManager().getDownloadIndex();
@@ -120,7 +121,7 @@ public class DownloadActionReceiver extends BroadcastReceiver {
         return ids;
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private static int progressOf(DownloadIndex idx, @Nullable String id) {
         if (id == null) return 0;
         try {
@@ -132,14 +133,14 @@ public class DownloadActionReceiver extends BroadcastReceiver {
     }
 
     @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private static void notifyPaused(Context c, @Nullable String id, int progress, boolean stateDownload) {
         Notification n = NotificationDownload.getNotification(c, id, progress, stateDownload);
         NotificationManagerCompat.from(c).notify(NOTIFICATION_ID, n);
     }
 
     @Nullable
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private Download findNextActiveDownload(DownloadIndex index, Set<String> excludeIds) {
         try (DownloadCursor cursor = index.getDownloads()) {
             while (cursor.moveToNext()) {
@@ -155,7 +156,7 @@ public class DownloadActionReceiver extends BroadcastReceiver {
         return null;
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private void removeIncomplete(Context ctx, DownloadIndex idx) throws IOException {
         try (DownloadCursor c = idx.getDownloads()) {
             while (c.moveToNext()) {
