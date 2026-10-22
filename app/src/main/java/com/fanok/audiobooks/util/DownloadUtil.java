@@ -21,7 +21,6 @@ import androidx.media3.exoplayer.offline.DownloadIndex;
 import androidx.media3.exoplayer.offline.DownloadManager;
 
 import com.fanok.audiobooks.App;
-import com.fanok.audiobooks.BuildConfig;
 import com.fanok.audiobooks.Url;
 
 import java.io.IOException;
@@ -47,9 +46,10 @@ public class DownloadUtil {
     @UnstableApi
     public static synchronized DataSource.Factory getResolvingUpstreamFactory(Context context) {
         if (resolvingUpstreamFactory == null) {
+            // No factory User-Agent: OkHttpDataSource would add it as a second header next to the
+            // resolver's one below; the shared client fills in Consts.USER_AGENT when none is set.
             androidx.media3.datasource.okhttp.OkHttpDataSource.Factory httpBase =
-                    new androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(App.getOkHttpClient())
-                            .setUserAgent(context.getPackageName() + "/" + BuildConfig.VERSION_NAME);
+                    new androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(App.getOkHttpClient());
             DataSource.Factory upstream = new DefaultDataSource.Factory(context.getApplicationContext(), httpBase);
 
             // Пер-запросное добавление заголовков по URI
@@ -111,6 +111,8 @@ public class DownloadUtil {
                 }
                 Uri cleanUri = u.buildUpon().encodedQuery(query).build();
 
+                // Merge: headers already on the DataSpec win over the per-provider defaults above.
+                map.putAll(dataSpec.httpRequestHeaders);
                 return dataSpec.withUri(cleanUri).withRequestHeaders(map);
             });
         }

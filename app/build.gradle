@@ -34,8 +34,6 @@ android {
             }
         }
 
-        manifestPlaceholders = [YANDEX_CLIENT_ID:"1fb77eec8444492db5758b184d0a259a"]
-
         applicationId "com.fanok.audiobooks"
         minSdkVersion 23
         targetSdkVersion 34
