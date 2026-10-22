@@ -11,17 +11,36 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
+import androidx.documentfile.provider.DocumentFile;
+import androidx.media3.exoplayer.offline.Download;
+import androidx.media3.exoplayer.offline.DownloadIndex;
+import androidx.media3.exoplayer.offline.DownloadService;
+import com.fanok.audiobooks.activity.BookActivity;
+import com.fanok.audiobooks.broadcasts.DownloadActionReceiver;
+import com.fanok.audiobooks.model.AudioListDBModel;
+import com.fanok.audiobooks.model.BooksDBModel;
 import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.room.BooksAudioEntity;
+import com.fanok.audiobooks.service.ExoDownloadService;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class DownloadStorageHelper {
 
     public static final String PREF_DOWNLOAD_PATH = "pref_download_path";
     public static final String PREF_DOWNLOAD_URI = "pref_download_uri";
 
-    private static volatile long lastScanStartMs = 0;
+    /** One worker serialises library scans and deletions so their read-modify-write passes never interleave. */
+    private static final ExecutorService STORAGE = Executors.newSingleThreadExecutor();
 
     public static boolean openFolderPicker(@NonNull ActivityResultLauncher<Intent> launcher) {
         try {
@@ -194,6 +213,11 @@ public class DownloadStorageHelper {
         return false;
     }
 
+    /**
+     * Opens the export destination of one chapter and puts the exact path or content:// URI being written into
+     * {@code outFinalPathOrUriHolder[0]}. Throws when neither the folder path nor the selected SAF folder accepts
+     * the file, instead of silently writing somewhere the settings do not name.
+     */
     @NonNull
     public static OutputStream openOutputStreamForExport(@NonNull Context context,
                                                         @Nullable String bookUrl,
@@ -205,9 +229,6 @@ public class DownloadStorageHelper {
                                                         @NonNull String[] outFinalPathOrUriHolder) throws IOException {
         File targetDir = getBookDownloadDir(context, bookUrl, bookName, artistName, autorName);
         File targetFile = new File(targetDir, fileName);
-        if (outFinalPathOrUriHolder != null && outFinalPathOrUriHolder.length > 0) {
-            outFinalPathOrUriHolder[0] = targetFile.getAbsolutePath();
-        }
 
         // 1. Попытка создания через стандартный FileOutputStream (если есть права доступа к ФС)
         try {
@@ -215,7 +236,11 @@ public class DownloadStorageHelper {
                 //noinspection ResultOfMethodCallIgnored
                 targetDir.mkdirs();
             }
-            return new java.io.FileOutputStream(targetFile);
+            OutputStream os = new java.io.FileOutputStream(targetFile);
+            if (outFinalPathOrUriHolder != null && outFinalPathOrUriHolder.length > 0) {
+                outFinalPathOrUriHolder[0] = targetFile.getAbsolutePath();
+            }
+            return os;
         } catch (Exception e) {
             android.util.Log.w("DownloadStorageHelper", "Standard FileOutputStream failed, trying SAF", e);
         }
@@ -226,9 +251,7 @@ public class DownloadStorageHelper {
             if (rootDoc != null) {
                 String sourceFolder = getSourceName(bookUrl);
                 String bookFolder = sanitizeFileName(bookName);
-                String voiceFolder = (artistName != null && !artistName.trim().isEmpty())
-                        ? sanitizeFileName(artistName)
-                        : ((autorName != null && !autorName.trim().isEmpty()) ? sanitizeFileName(autorName) : "DefaultVoice");
+                String voiceFolder = voiceFolder(artistName, autorName);
 
                 androidx.documentfile.provider.DocumentFile sourceDoc = findOrCreateSubdir(rootDoc, sourceFolder);
                 if (sourceDoc != null) {
@@ -255,26 +278,9 @@ public class DownloadStorageHelper {
                 }
             }
         } catch (Exception e) {
-            android.util.Log.w("DownloadStorageHelper", "SAF DocumentFile output stream failed, trying fallback path", e);
+            android.util.Log.w("DownloadStorageHelper", "SAF DocumentFile output stream failed", e);
         }
-
-        // 3. Резервный фолбэк на внутреннюю папку загрузок приложения (гарантированные права)
-        File defaultBaseDir = new File(getDefaultPath(context));
-        String sourceFolder = getSourceName(bookUrl);
-        String bookFolder = sanitizeFileName(bookName);
-        String voiceFolder = (artistName != null && !artistName.trim().isEmpty())
-                ? sanitizeFileName(artistName)
-                : ((autorName != null && !autorName.trim().isEmpty()) ? sanitizeFileName(autorName) : "DefaultVoice");
-        File defaultTargetDir = new File(defaultBaseDir, sourceFolder + File.separator + bookFolder + File.separator + voiceFolder);
-        if (!defaultTargetDir.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            defaultTargetDir.mkdirs();
-        }
-        File defaultTargetFile = new File(defaultTargetDir, fileName);
-        if (outFinalPathOrUriHolder != null && outFinalPathOrUriHolder.length > 0) {
-            outFinalPathOrUriHolder[0] = defaultTargetFile.getAbsolutePath();
-        }
-        return new java.io.FileOutputStream(defaultTargetFile);
+        throw new IOException("Download folder does not accept " + fileName);
     }
 
     private static androidx.documentfile.provider.DocumentFile findOrCreateSubdir(androidx.documentfile.provider.DocumentFile parent, String name) {
@@ -371,15 +377,21 @@ public class DownloadStorageHelper {
 
     @NonNull
     public static File getBookDownloadDir(@NonNull Context context, @Nullable String bookUrl, @Nullable String bookName, @Nullable String artistName, @Nullable String autorName) {
-        String basePath = getDownloadPath(context);
-        String sourceFolder = getSourceName(bookUrl);
-        String bookFolder = sanitizeFileName(bookName);
-        String voiceFolder = (artistName != null && !artistName.trim().isEmpty())
-                ? sanitizeFileName(artistName)
-                : ((autorName != null && !autorName.trim().isEmpty()) ? sanitizeFileName(autorName) : "DefaultVoice");
+        return new File(getDownloadPath(context), exportRelativeDir(bookUrl, bookName, artistName, autorName));
+    }
 
-        File targetDir = new File(basePath, sourceFolder + File.separator + bookFolder + File.separator + voiceFolder);
-        return targetDir;
+    /** "source/book/reader": where below the download root the exporter writes a book's chapters. */
+    @NonNull
+    static String exportRelativeDir(@Nullable String bookUrl, @Nullable String bookName,
+                                    @Nullable String artistName, @Nullable String autorName) {
+        return getSourceName(bookUrl) + "/" + sanitizeFileName(bookName) + "/" + voiceFolder(artistName, autorName);
+    }
+
+    @NonNull
+    private static String voiceFolder(@Nullable String artistName, @Nullable String autorName) {
+        if (artistName != null && !artistName.trim().isEmpty()) return sanitizeFileName(artistName);
+        if (autorName != null && !autorName.trim().isEmpty()) return sanitizeFileName(autorName);
+        return "DefaultVoice";
     }
 
     @Nullable
@@ -397,254 +409,6 @@ public class DownloadStorageHelper {
             e.printStackTrace();
         }
         return null;
-    }
-
-    @NonNull
-    public static String deleteBookFiles(@NonNull Context context, @Nullable String bookUrl, @Nullable BookPOJO book) {
-        StringBuilder log = new StringBuilder();
-        log.append("--- НАЧАЛО УДАЛЕНИЯ ---\n");
-        log.append("URL книги: ").append(bookUrl).append("\n");
-        if (context == null || bookUrl == null || bookUrl.isEmpty()) {
-            log.append("Ошибка: Context или bookUrl равен null/empty.\n");
-            return log.toString();
-        }
-
-        try {
-            com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(context);
-            java.util.ArrayList<com.fanok.audiobooks.pojo.AudioListPOJO> tracks = audioListDBModel.get(bookUrl);
-            log.append("Найдено треков в БД: ").append(tracks != null ? tracks.size() : 0).append("\n");
-
-            java.util.HashSet<File> parentDirs = new java.util.HashSet<>();
-
-            if (tracks != null && !tracks.isEmpty()) {
-                int delCount = 0;
-                int errCount = 0;
-                for (com.fanok.audiobooks.pojo.AudioListPOJO track : tracks) {
-                    String url = track.getAudioUrl();
-                    if (url != null && !url.isEmpty()) {
-                        if (url.startsWith("content://")) {
-                            try {
-                                Uri uri = Uri.parse(url);
-                                boolean res = false;
-                                androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri);
-                                if (doc != null && doc.exists()) {
-                                    res = doc.delete();
-                                }
-                                if (!res) {
-                                    res = android.provider.DocumentsContract.deleteDocument(context.getContentResolver(), uri);
-                                }
-                                if (res) delCount++; else errCount++;
-                                log.append("SAF Трек ").append(uri.getLastPathSegment()).append(" удален: ").append(res).append("\n");
-                            } catch (Exception e) {
-                                errCount++;
-                                log.append("SAF ошибка ").append(url).append(": ").append(e.getMessage()).append("\n");
-                            }
-                        } else {
-                            try {
-                                File f = new File(url);
-                                if (f.exists()) {
-                                    File parent = f.getParentFile();
-                                    if (parent != null) parentDirs.add(parent);
-                                    boolean res = f.delete();
-                                    if (res) delCount++; else errCount++;
-                                    log.append("Файл ").append(f.getName()).append(" удален: ").append(res).append("\n");
-                                } else {
-                                    log.append("Файл не найден на диске: ").append(f.getAbsolutePath()).append("\n");
-                                }
-                            } catch (Exception e) {
-                                errCount++;
-                                log.append("Ошибка файла ").append(url).append(": ").append(e.getMessage()).append("\n");
-                            }
-                        }
-                    }
-                }
-                log.append("Итог по трекам: Успешно=").append(delCount).append(", Ошибок=").append(errCount).append("\n");
-            }
-
-            String sourceName = com.fanok.audiobooks.util.DownloadStorageHelper.getSourceName(bookUrl);
-            String basePathRoot = getDownloadPath(context);
-            File baseRootDir = new File(basePathRoot);
-
-            for (File parent : parentDirs) {
-                if (parent != null && parent.exists()) {
-                    log.append("Удаляем родительскую папку: ").append(parent.getAbsolutePath()).append("\n");
-                    deleteRecursive(parent);
-                    log.append("Статус папки после удаления: существует=").append(parent.exists()).append("\n");
-
-                    File current = parent.getParentFile();
-                    while (current != null && current.exists()) {
-                        String currentName = current.getName();
-                        boolean isSourceFolder = currentName != null && sourceName != null
-                                && currentName.equalsIgnoreCase(sourceName);
-                        boolean isBaseRoot = baseRootDir != null && current.getAbsolutePath().equals(
-                                baseRootDir.getAbsolutePath());
-                        if (isSourceFolder || isBaseRoot) {
-                            break;
-                        }
-                        File[] children = current.listFiles();
-                        boolean isEmpty = children == null || children.length == 0;
-                        if (!isEmpty) {
-                            break;
-                        }
-                        log.append("Удаляем пустую папку: ").append(current.getAbsolutePath()).append("\n");
-                        if (!current.delete()) {
-                            break;
-                        }
-                        current = current.getParentFile();
-                    }
-                }
-            }
-
-            if (book == null) {
-                com.fanok.audiobooks.model.BooksDBModel dbModel = new com.fanok.audiobooks.model.BooksDBModel(context);
-                book = dbModel.getSomewhere(bookUrl);
-                dbModel.closeDB();
-            }
-
-            if (book != null && book.getName() != null && !book.getName().trim().isEmpty()) {
-                File expectedVoiceDir = getBookDownloadDir(context, bookUrl, book.getName(), book.getArtist(), book.getAutor());
-                File expectedBookDir = (expectedVoiceDir != null) ? expectedVoiceDir.getParentFile() : null;
-                if (expectedBookDir != null && expectedBookDir.exists()) {
-                    log.append("Прямое удаление папки книги: ").append(expectedBookDir.getAbsolutePath()).append("\n");
-                    deleteRecursive(expectedBookDir);
-                    log.append("Папка книги удалена, существует=").append(expectedBookDir.exists()).append("\n");
-                }
-            }
-
-            java.util.ArrayList<String> targetNames = new java.util.ArrayList<>();
-            if (book != null && book.getName() != null && !book.getName().trim().isEmpty()) {
-                targetNames.add(book.getName().trim());
-                targetNames.add(sanitizeFileName(book.getName()));
-            }
-            int lastSlash = bookUrl.lastIndexOf('/');
-            if (lastSlash >= 0 && lastSlash < bookUrl.length() - 1) {
-                String slug = bookUrl.substring(lastSlash + 1);
-                targetNames.add(slug);
-                targetNames.add(sanitizeFileName(slug));
-            }
-
-            log.append("Поиск директории книги по именам: ").append(targetNames.toString()).append("\n");
-
-            androidx.documentfile.provider.DocumentFile rootDoc = getRootDocumentFile(context);
-            if (rootDoc != null) {
-                log.append("Сканируем SAF Root: ").append(rootDoc.getName()).append("\n");
-                for (String targetName : targetNames) {
-                    if (targetName != null && !targetName.isEmpty()) {
-                        deleteDocMatching(rootDoc, targetName, log);
-                    }
-                }
-            } else {
-                log.append("SAF Root не настроен.\n");
-            }
-
-            String basePath = getDownloadPath(context);
-            File baseDir = new File(basePath);
-            if (baseDir.exists()) {
-                log.append("Сканируем локальный путь: ").append(baseDir.getAbsolutePath()).append("\n");
-                for (String targetName : targetNames) {
-                    if (targetName != null && !targetName.isEmpty()) {
-                        deleteFileMatching(baseDir, targetName, log);
-                    }
-                }
-            } else {
-                log.append("Локальный путь загрузки не существует: ").append(basePath).append("\n");
-            }
-        } catch (Exception e) {
-            log.append("Критическое исключение: ").append(e.toString()).append("\n");
-        }
-        log.append("--- КОНЕЦ УДАЛЕНИЯ ---");
-        return log.toString();
-    }
-
-    @NonNull
-    public static String deleteBookFiles(@NonNull Context context, @Nullable String bookUrl) {
-        return deleteBookFiles(context, bookUrl, null);
-    }
-
-    private static String normalizeForComparison(@Nullable String s) {
-        if (s == null) return "";
-        return s.toLowerCase().replaceAll("[^a-z0-9а-яё]", "");
-    }
-
-    private static void deleteDocMatching(@NonNull androidx.documentfile.provider.DocumentFile dir, @NonNull String targetName, @NonNull StringBuilder log) {
-        if (dir.getName() != null && dir.getName().startsWith(".")) return;
-        if (targetName == null || targetName.trim().isEmpty()) return;
-
-        String tName = normalizeForComparison(targetName);
-        String dName = dir.getName() != null ? normalizeForComparison(dir.getName()) : "";
-
-        if (!tName.isEmpty() && dName.equals(tName)) {
-            log.append("SAF Найдена совпавшая директория: ").append(dir.getName()).append(" -> Удаляем SAF дерево...\n");
-            deleteDocRecursive(dir);
-            return;
-        }
-
-        androidx.documentfile.provider.DocumentFile[] files = dir.listFiles();
-        if (files != null) {
-            for (androidx.documentfile.provider.DocumentFile file : files) {
-                String fName = file.getName() != null ? normalizeForComparison(file.getName()) : "";
-                if (!tName.isEmpty() && fName.equals(tName)) {
-                    log.append("SAF Найдена совпавшая дочерняя директория: ").append(file.getName()).append(" -> Удаляем...\n");
-                    deleteDocRecursive(file);
-                } else if (file.isDirectory()) {
-                    deleteDocMatching(file, targetName, log);
-                }
-            }
-        }
-    }
-
-    private static void deleteDocRecursive(@NonNull androidx.documentfile.provider.DocumentFile doc) {
-        if (doc.isDirectory()) {
-            androidx.documentfile.provider.DocumentFile[] children = doc.listFiles();
-            if (children != null) {
-                for (androidx.documentfile.provider.DocumentFile child : children) {
-                    deleteDocRecursive(child);
-                }
-            }
-        }
-        doc.delete();
-    }
-
-    private static void deleteFileMatching(@NonNull File dir, @NonNull String targetName, @NonNull StringBuilder log) {
-        if (dir.getName().startsWith(".")) return;
-        if (targetName == null || targetName.trim().isEmpty()) return;
-
-        String tName = normalizeForComparison(targetName);
-        String dName = normalizeForComparison(dir.getName());
-
-        if (!tName.isEmpty() && dName.equals(tName)) {
-            log.append("File Найдена директория: ").append(dir.getAbsolutePath()).append(" -> Удаляем папку...\n");
-            deleteRecursive(dir);
-            log.append("Папка удалена, существует=").append(dir.exists()).append("\n");
-            return;
-        }
-
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                String fName = normalizeForComparison(file.getName());
-                if (!tName.isEmpty() && fName.equals(tName)) {
-                    log.append("File Найдена дочерняя папка: ").append(file.getAbsolutePath()).append(" -> Удаляем...\n");
-                    deleteRecursive(file);
-                    log.append("Удаление завершено, существует=").append(file.exists()).append("\n");
-                } else if (file.isDirectory()) {
-                    deleteFileMatching(file, targetName, log);
-                }
-            }
-        }
-    }
-
-    public static void deleteRecursive(@Nullable File fileOrDirectory) {
-        if (fileOrDirectory == null || !fileOrDirectory.exists()) return;
-        if (fileOrDirectory.isDirectory()) {
-            File[] children = fileOrDirectory.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    deleteRecursive(child);
-                }
-            }
-        }
-        fileOrDirectory.delete();
     }
 
     @Nullable
@@ -702,27 +466,27 @@ public class DownloadStorageHelper {
     }
 
     public static void scanAndImportDownloadedBooks(@NonNull Context context, @Nullable Runnable onDone) {
-        new Thread(() -> {
+        final Context app = context.getApplicationContext();
+        STORAGE.execute(() -> {
             try {
-                com.fanok.audiobooks.model.BooksDBModel booksDBModel = new com.fanok.audiobooks.model.BooksDBModel(context);
-                com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(context);
+                BooksDBModel booksDBModel = new BooksDBModel(app);
+                AudioListDBModel audioListDBModel = new AudioListDBModel(app);
 
-                String downloadPath = getDownloadPath(context);
+                String downloadPath = getDownloadPath(app);
                 File baseDir = new File(downloadPath);
                 if (baseDir.exists() && baseDir.isDirectory() && baseDir.canRead()) {
-                    scanDirRecursive(context, booksDBModel, audioListDBModel, baseDir);
+                    scanDirRecursive(app, booksDBModel, audioListDBModel, baseDir,
+                            exportedLocations(app, booksDBModel, audioListDBModel, false));
                 } else {
-                    androidx.documentfile.provider.DocumentFile rootDoc = getRootDocumentFile(context);
+                    androidx.documentfile.provider.DocumentFile rootDoc = getRootDocumentFile(app);
                     if (rootDoc != null) {
-                        scanDocDirRecursive(context, booksDBModel, audioListDBModel, rootDoc);
+                        scanDocDirRecursive(app, booksDBModel, audioListDBModel, rootDoc, "",
+                                exportedLocations(app, booksDBModel, audioListDBModel, true));
                     }
                 }
 
-                booksDBModel.closeDB();
-                audioListDBModel.closeDB();
-
-                Intent intent = new Intent(com.fanok.audiobooks.activity.BookActivity.Broadcast_UPDATE_ADAPTER);
-                context.sendBroadcast(intent);
+                Intent intent = new Intent(BookActivity.Broadcast_UPDATE_ADAPTER);
+                app.sendBroadcast(intent);
             } catch (Throwable t) {
                 android.util.Log.e("ScanHelper", "Error scanning download folder", t);
             } finally {
@@ -731,13 +495,40 @@ public class DownloadStorageHelper {
                     mainHandler.post(onDone);
                 }
             }
-        }).start();
+        });
+    }
+
+    /**
+     * What the scan must not import as separate books: the copies recorded for online books (local_uri, or a local
+     * url_audio written before local_uri existed) and the export folder of every saved online book, as absolute
+     * paths or, for a SAF scan, as "source/book/reader" below the tree.
+     */
+    @NonNull
+    private static Set<String> exportedLocations(@NonNull Context context, @NonNull BooksDBModel booksDBModel,
+                                                 @NonNull AudioListDBModel audioListDBModel, boolean saf) {
+        Set<String> exported = new HashSet<>();
+        for (BooksAudioEntity row : audioListDBModel.getDatabase().booksAudioDao().getAll()) {
+            if (DeletionPlanner.isImportedBook(row.urlBook)) continue;
+            if (row.localUri != null) exported.add(row.localUri);
+            if (row.urlAudio != null && !DeletionPlanner.isRemote(row.urlAudio)) exported.add(row.urlAudio);
+        }
+        java.util.ArrayList<BookPOJO> saved = booksDBModel.getAllSaved();
+        if (saved != null) {
+            for (BookPOJO book : saved) {
+                if (book.getUrl() == null || DeletionPlanner.isImportedBook(book.getUrl())) continue;
+                exported.add(saf
+                        ? exportRelativeDir(book.getUrl(), book.getName(), book.getArtist(), book.getAutor())
+                        : getBookDownloadDir(context, book.getUrl(), book.getName(), book.getArtist(), book.getAutor()).getAbsolutePath());
+            }
+        }
+        return exported;
     }
 
     private static void scanDocDirRecursive(@NonNull Context context,
                                              @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                              @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
-                                             @NonNull androidx.documentfile.provider.DocumentFile dir) {
+                                             @NonNull androidx.documentfile.provider.DocumentFile dir,
+                                             @NonNull String relativePath, @NonNull Set<String> exported) {
         if (dir.getName() != null && dir.getName().startsWith(".")) return;
 
         androidx.documentfile.provider.DocumentFile[] files = dir.listFiles();
@@ -745,12 +536,12 @@ public class DownloadStorageHelper {
 
         java.util.List<androidx.documentfile.provider.DocumentFile> audioDocFiles = new java.util.ArrayList<>();
         for (androidx.documentfile.provider.DocumentFile f : files) {
-            if (f.isFile() && isAudioFileName(f.getName())) {
+            if (f.isFile() && isAudioFileName(f.getName()) && !exported.contains(f.getUri().toString())) {
                 audioDocFiles.add(f);
             }
         }
 
-        if (!audioDocFiles.isEmpty()) {
+        if (!audioDocFiles.isEmpty() && !exported.contains(relativePath)) {
             String dirName = dir.getName() != null ? dir.getName() : "Voice";
             String voiceName = "Основной";
             String bookName = dirName;
@@ -759,13 +550,6 @@ public class DownloadStorageHelper {
             androidx.documentfile.provider.DocumentFile parent = dir.getParentFile();
             if (parent != null && parent.getName() != null && !parent.getName().equalsIgnoreCase("Download") && !parent.getName().equalsIgnoreCase("0")) {
                 if (dirName.equalsIgnoreCase("DefaultVoice") || dirName.equalsIgnoreCase("Voice") || dirName.toLowerCase().startsWith("озвуч")) {
-                    voiceName = dirName;
-                    bookName = parent.getName();
-                    androidx.documentfile.provider.DocumentFile grandParent = parent.getParentFile();
-                    if (grandParent != null && grandParent.getName() != null && !grandParent.getName().equalsIgnoreCase("Download")) {
-                        sourceName = grandParent.getName();
-                    }
-                } else if (hasRealSavedBookWithName(booksDBModel, parent.getName())) {
                     voiceName = dirName;
                     bookName = parent.getName();
                     androidx.documentfile.provider.DocumentFile grandParent = parent.getParentFile();
@@ -782,7 +566,8 @@ public class DownloadStorageHelper {
 
         for (androidx.documentfile.provider.DocumentFile f : files) {
             if (f.isDirectory()) {
-                scanDocDirRecursive(context, booksDBModel, audioListDBModel, f);
+                scanDocDirRecursive(context, booksDBModel, audioListDBModel, f,
+                        relativePath.isEmpty() ? f.getName() : relativePath + "/" + f.getName(), exported);
             }
         }
     }
@@ -829,72 +614,28 @@ public class DownloadStorageHelper {
                                           @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
                                           @NonNull androidx.documentfile.provider.DocumentFile dir,
                                           @NonNull java.util.List<androidx.documentfile.provider.DocumentFile> audioDocFiles) {
-        String fakeUrl = "https://" + sourceName.toLowerCase() + ".org/imported/" + sanitizeFileName(bookName);
-
-        // If a real (non-imported) saved book with the same name exists, keep it and skip importing
-        if (hasRealSavedBookWithName(booksDBModel, bookName)) {
-            android.util.Log.i("ScanHelper", "Skip import '" + bookName + "' - already saved with real URL");
-            return;
-        }
-
-        String photoUrl = findDocCoverImage(dir);
-
-        // Deduplication: remove any old ExoPlayer-based saved entries for the same book name
-        findAndRemoveOldSavedEntries(booksDBModel, audioListDBModel, bookName, fakeUrl);
-
-        BookPOJO book = booksDBModel.getSaved(fakeUrl);
-        if (book == null) {
-            book = new BookPOJO();
-            book.setUrl(fakeUrl);
-            book.setName(bookName.replace("_", " "));
-            book.setArtist(voiceName.replace("_", " "));
-            book.setAutor("Импортировано");
-            book.setPhoto(photoUrl);
-
-            booksDBModel.addSaved(book);
-        } else if ((book.getPhoto() == null || book.getPhoto().isEmpty()) && !photoUrl.isEmpty()) {
-            book.setPhoto(photoUrl);
-            booksDBModel.addSaved(book);
-        }
-
-        java.util.Collections.sort(audioDocFiles, new java.util.Comparator<androidx.documentfile.provider.DocumentFile>() {
-            @Override
-            public int compare(androidx.documentfile.provider.DocumentFile f1, androidx.documentfile.provider.DocumentFile f2) {
-                String n1 = f1.getName() != null ? f1.getName() : "";
-                String n2 = f2.getName() != null ? f2.getName() : "";
-                return n1.compareTo(n2);
-            }
-        });
-
-        audioListDBModel.remove(fakeUrl);
-
+        List<String[]> tracks = new ArrayList<>();
         for (androidx.documentfile.provider.DocumentFile audioDoc : audioDocFiles) {
-            com.fanok.audiobooks.pojo.AudioListPOJO audioPOJO = new com.fanok.audiobooks.pojo.AudioListPOJO();
-            audioPOJO.setBookUrl(fakeUrl);
-            audioPOJO.setBookName(bookName.replace("_", " "));
-            String nameNoExt = audioDoc.getName() != null ? audioDoc.getName() : "track";
-            int dotPos = nameNoExt.lastIndexOf('.');
-            if (dotPos > 0) nameNoExt = nameNoExt.substring(0, dotPos);
-            audioPOJO.setAudioName(nameNoExt);
-            audioPOJO.setAudioUrl(audioDoc.getUri() != null ? audioDoc.getUri().toString() : "");
-            audioListDBModel.add(audioPOJO);
+            tracks.add(new String[]{audioDoc.getName() != null ? audioDoc.getName() : "track",
+                    audioDoc.getUri() != null ? audioDoc.getUri().toString() : ""});
         }
+        importPlaylist(booksDBModel, audioListDBModel, sourceName, bookName, voiceName, findDocCoverImage(dir), tracks);
     }
 
     private static void scanDirRecursive(@NonNull Context context,
                                          @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                          @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
-                                         @NonNull File dir) {
+                                         @NonNull File dir, @NonNull Set<String> exported) {
         if (dir.getName().startsWith(".")) return;
 
         File[] audioFiles = dir.listFiles(new java.io.FilenameFilter() {
             @Override
             public boolean accept(File d, String name) {
-                return isAudioFileName(name);
+                return isAudioFileName(name) && !exported.contains(new File(d, name).getAbsolutePath());
             }
         });
 
-        if (audioFiles != null && audioFiles.length > 0) {
+        if (audioFiles != null && audioFiles.length > 0 && !exported.contains(dir.getAbsolutePath())) {
             String dirName = dir.getName();
             String voiceName = "Основной";
             String bookName = dirName;
@@ -903,13 +644,6 @@ public class DownloadStorageHelper {
             File parent = dir.getParentFile();
             if (parent != null && !parent.getName().equalsIgnoreCase("Download") && !parent.getName().equalsIgnoreCase("0") && !parent.getName().equalsIgnoreCase("sdcard")) {
                 if (dirName.equalsIgnoreCase("DefaultVoice") || dirName.equalsIgnoreCase("Voice") || dirName.toLowerCase().startsWith("озвуч")) {
-                    voiceName = dirName;
-                    bookName = parent.getName();
-                    File grandParent = parent.getParentFile();
-                    if (grandParent != null && !grandParent.getName().equalsIgnoreCase("Download") && !grandParent.getName().equalsIgnoreCase("0")) {
-                        sourceName = grandParent.getName();
-                    }
-                } else if (hasRealSavedBookWithName(booksDBModel, parent.getName())) {
                     voiceName = dirName;
                     bookName = parent.getName();
                     File grandParent = parent.getParentFile();
@@ -932,7 +666,7 @@ public class DownloadStorageHelper {
         });
         if (subDirs != null) {
             for (File subDir : subDirs) {
-                scanDirRecursive(context, booksDBModel, audioListDBModel, subDir);
+                scanDirRecursive(context, booksDBModel, audioListDBModel, subDir, exported);
             }
         }
     }
@@ -942,490 +676,362 @@ public class DownloadStorageHelper {
                                        @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
                                        @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
                                        @NonNull File dir, @NonNull File[] audioFiles) {
-        String fakeUrl = "https://" + sourceName.toLowerCase() + ".org/imported/" + sanitizeFileName(bookName);
-
-        // If a real (non-imported) saved book with the same name exists, keep it and skip importing
-        if (hasRealSavedBookWithName(booksDBModel, bookName)) {
-            android.util.Log.i("ScanHelper", "Skip import '" + bookName + "' - already saved with real URL");
-            return;
-        }
-
-        String photoUrl = findCoverImage(dir);
-
-        // Deduplication: remove any old ExoPlayer-based saved entries for the same book name
-        findAndRemoveOldSavedEntries(booksDBModel, audioListDBModel, bookName, fakeUrl);
-
-        BookPOJO book = booksDBModel.getSaved(fakeUrl);
-        if (book == null) {
-            book = new BookPOJO();
-            book.setUrl(fakeUrl);
-            book.setName(bookName.replace("_", " "));
-            book.setArtist(voiceName.replace("_", " "));
-            book.setAutor("Импортировано");
-            book.setPhoto(photoUrl);
-
-            booksDBModel.addSaved(book);
-        } else if ((book.getPhoto() == null || book.getPhoto().isEmpty()) && !photoUrl.isEmpty()) {
-            book.setPhoto(photoUrl);
-            booksDBModel.addSaved(book);
-        }
-
-        java.util.Arrays.sort(audioFiles, new java.util.Comparator<File>() {
-            @Override
-            public int compare(File f1, File f2) {
-                return f1.getName().compareTo(f2.getName());
-            }
-        });
-
-        audioListDBModel.remove(fakeUrl);
-
+        List<String[]> tracks = new ArrayList<>();
         for (File audioFile : audioFiles) {
-            com.fanok.audiobooks.pojo.AudioListPOJO audioPOJO = new com.fanok.audiobooks.pojo.AudioListPOJO();
-            audioPOJO.setBookUrl(fakeUrl);
-            audioPOJO.setBookName(bookName.replace("_", " "));
-            String nameNoExt = audioFile.getName();
-            int dotPos = nameNoExt.lastIndexOf('.');
-            if (dotPos > 0) nameNoExt = nameNoExt.substring(0, dotPos);
-            audioPOJO.setAudioName(nameNoExt);
-            audioPOJO.setAudioUrl(audioFile.getAbsolutePath());
-            audioListDBModel.add(audioPOJO);
+            tracks.add(new String[]{audioFile.getName(), audioFile.getAbsolutePath()});
         }
-    }
-
-    private static boolean hasRealSavedBookWithName(
-            @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
-            @NonNull String bookName) {
-        try {
-            java.util.ArrayList<BookPOJO> allSaved = booksDBModel.getAllSaved();
-            if (allSaved == null) return false;
-
-            String normalizedName = normalizeForComparison(bookName);
-            String sanitizedName = normalizeForComparison(sanitizeFileName(bookName));
-
-            for (BookPOJO existing : allSaved) {
-                if (existing.getUrl() == null || existing.getUrl().contains("/imported/")) continue;
-                String existingName = normalizeForComparison(existing.getName());
-                if (!normalizedName.isEmpty() && (normalizedName.equals(existingName) || sanitizedName.equals(existingName))) {
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            android.util.Log.e("ScanHelper", "Error checking for existing saved book", e);
-        }
-        return false;
+        importPlaylist(booksDBModel, audioListDBModel, sourceName, bookName, voiceName, findCoverImage(dir), tracks);
     }
 
     /**
-     * Finds and removes old ExoPlayer-based saved entries that match the same book name
-     * but have a different URL (not imported). This prevents duplicates when the same book
-     * exists both as an ExoPlayer download entry and as a local imported entry.
+     * Writes one scanned folder as an imported book in one transaction, tracks ({name, uri}) in natural order.
+     * The identity is source, title and reader folder, so two readers of one title stay two books.
      */
-    static void findAndRemoveOldSavedEntries(
-            @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
-            @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
-            @NonNull String bookName,
-            @NonNull String newFakeUrl) {
-        try {
-            java.util.ArrayList<BookPOJO> allSaved = booksDBModel.getAllSaved();
-            if (allSaved == null) return;
+    private static void importPlaylist(@NonNull BooksDBModel booksDBModel, @NonNull AudioListDBModel audioListDBModel,
+                                       @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
+                                       @NonNull String photoUrl, @NonNull List<String[]> tracks) {
+        String legacyUrl = "https://" + sourceName.toLowerCase() + ".org/imported/" + sanitizeFileName(bookName);
+        String fakeUrl = legacyUrl + "/" + sanitizeFileName(voiceName);
+        Collections.sort(tracks, (t1, t2) -> StorageNames.naturalCompare(t1[0], t2[0]));
 
-            String normalizedNewName = normalizeForComparison(bookName);
-            String sanitizedNewName = normalizeForComparison(sanitizeFileName(bookName));
+        audioListDBModel.getDatabase().runInTransaction(() -> {
+            // Imports made before the reader was part of the identity shared one URL per title.
+            booksDBModel.removeSavedByUrl(legacyUrl);
+            audioListDBModel.remove(legacyUrl);
 
-            for (BookPOJO existing : allSaved) {
-                if (existing.getUrl() == null) continue;
-                // Skip if it's the same imported URL
-                if (existing.getUrl().equals(newFakeUrl)) continue;
-                // Skip other imported entries
-                if (existing.getUrl().contains("/imported/")) continue;
+            BookPOJO book = booksDBModel.getSaved(fakeUrl);
+            if (book == null) {
+                book = new BookPOJO();
+                book.setUrl(fakeUrl);
+                book.setName(bookName.replace("_", " "));
+                book.setArtist(voiceName.replace("_", " "));
+                book.setAutor("Импортировано");
+                book.setPhoto(photoUrl);
 
-                // Check if the book name matches
-                String existingName = normalizeForComparison(existing.getName());
-                String existingSlug = "";
-                int lastSlash = existing.getUrl().lastIndexOf('/');
-                if (lastSlash >= 0 && lastSlash < existing.getUrl().length() - 1) {
-                    existingSlug = normalizeForComparison(existing.getUrl().substring(lastSlash + 1));
-                }
-
-                boolean nameMatch = (!normalizedNewName.isEmpty() && (normalizedNewName.equals(existingName) || sanitizedNewName.equals(existingName)))
-                        || (!existingSlug.isEmpty() && (existingSlug.equals(normalizedNewName) || existingSlug.equals(sanitizedNewName)));
-
-                if (nameMatch) {
-                    android.util.Log.i("ScanHelper", "Dedup: removing old saved entry '" + existing.getUrl() + "' (name: " + existing.getName() + ") in favor of imported '" + newFakeUrl + "'");
-                    // Remove old audio list entries
-                    audioListDBModel.remove(existing.getUrl());
-                    // Remove old saved book entry
-                    booksDBModel.removeSaved(existing);
-                }
+                booksDBModel.addSaved(book);
+            } else if ((book.getPhoto() == null || book.getPhoto().isEmpty()) && !photoUrl.isEmpty()) {
+                book.setPhoto(photoUrl);
+                booksDBModel.addSaved(book);
             }
+
+            audioListDBModel.remove(fakeUrl);
+            for (String[] track : tracks) {
+                com.fanok.audiobooks.pojo.AudioListPOJO audioPOJO = new com.fanok.audiobooks.pojo.AudioListPOJO();
+                audioPOJO.setBookUrl(fakeUrl);
+                audioPOJO.setBookName(bookName.replace("_", " "));
+                String nameNoExt = track[0];
+                int dotPos = nameNoExt.lastIndexOf('.');
+                if (dotPos > 0) nameNoExt = nameNoExt.substring(0, dotPos);
+                audioPOJO.setAudioName(nameNoExt);
+                audioPOJO.setAudioUrl(track[1]);
+                audioListDBModel.add(audioPOJO);
+            }
+        });
+    }
+
+    /** Media3 download id of a remote chapter URL: scheme, authority and path without the query. */
+    @NonNull
+    public static String downloadIdOf(@NonNull String remoteUrl) {
+        Uri uri = Uri.parse(remoteUrl);
+        return new Uri.Builder()
+                .scheme(uri.getScheme())
+                .authority(uri.getAuthority())
+                .path(uri.getPath())
+                .build()
+                .toString();
+    }
+
+    /** "NNN - title.ext" for the chapter whose remote URL has {@code downloadId}; NNN is its position in the book. */
+    @NonNull
+    public static String exportFileNameFor(@NonNull Context context, @NonNull String bookUrl,
+                                           @NonNull String downloadId, @Nullable String title, @NonNull String ext) {
+        int index = 0;
+        List<BooksAudioEntity> rows = new AudioListDBModel(context).getRows(bookUrl);
+        for (int i = 0; i < rows.size(); i++) {
+            String url = rows.get(i).urlAudio;
+            if (DeletionPlanner.isRemote(url) && downloadId.equals(downloadIdOf(url))) {
+                index = i + 1;
+                break;
+            }
+        }
+        return StorageNames.exportFileName(index, title, ext);
+    }
+
+    /** Whether the exact file named by a recorded URI or path opens; directories are never searched. */
+    public static boolean exists(@NonNull Context context, @NonNull String uriOrPath) {
+        try {
+            if (uriOrPath.startsWith("content://")) {
+                DocumentFile doc = DocumentFile.fromSingleUri(context, Uri.parse(uriOrPath));
+                return doc != null && doc.exists();
+            }
+            String path = uriOrPath.startsWith("file://") ? Uri.parse(uriOrPath).getPath() : uriOrPath;
+            return path != null && new File(path).isFile();
         } catch (Exception e) {
-            android.util.Log.e("ScanHelper", "Error during deduplication", e);
+            return false;
         }
     }
 
+    /** The row's own playable local copy: its recorded export, else a local url_audio (imported books); or null. */
     @Nullable
-    private static File findFileInDirByName(@NonNull File dir, @Nullable String targetName) {
-        if (targetName == null || targetName.trim().isEmpty()) return null;
-        if (!dir.exists() || !dir.isDirectory()) return null;
-        if (dir.getName().startsWith(".")) return null;
-
-        String tNorm = normalizeForComparison(targetName);
-        if (tNorm.isEmpty()) return null;
-
-        File[] files = dir.listFiles();
-        if (files == null) return null;
-
-        for (File f : files) {
-            if (f.isFile() && isAudioFileName(f.getName())) {
-                String fname = f.getName();
-                int dot = fname.lastIndexOf('.');
-                String nameNoExt = dot > 0 ? fname.substring(0, dot) : fname;
-                if (normalizeForComparison(nameNoExt).equals(tNorm)) {
-                    return f;
-                }
-            }
+    public static String localCopyOf(@NonNull Context context, @NonNull BooksAudioEntity row) {
+        if (row.localUri != null && !row.localUri.isEmpty() && exists(context, row.localUri)) {
+            return row.localUri;
         }
-
-        for (File f : files) {
-            if (f.isDirectory()) {
-                File res = findFileInDirByName(f, targetName);
-                if (res != null) return res;
-            }
+        if (row.urlAudio != null && !row.urlAudio.isEmpty() && !DeletionPlanner.isRemote(row.urlAudio)
+                && exists(context, row.urlAudio)) {
+            return row.urlAudio;
         }
         return null;
     }
 
-    public static void repairSavedBooksDatabase(@NonNull Context context) {
-        new Thread(() -> {
-            try {
-                com.fanok.audiobooks.model.BooksDBModel booksDBModel = new com.fanok.audiobooks.model.BooksDBModel(context);
-                com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(context);
-
-                java.util.ArrayList<BookPOJO> savedBooks = booksDBModel.getAllSaved();
-                if (savedBooks == null || savedBooks.isEmpty()) {
-                    booksDBModel.closeDB();
-                    audioListDBModel.closeDB();
-                    return;
-                }
-
-                String downloadPath = getDownloadPath(context);
-                File baseDir = new File(downloadPath);
-                java.util.HashSet<String> claimedParents = new java.util.HashSet<>();
-
-                for (BookPOJO book : savedBooks) {
-                    if (book.getUrl() == null || book.getUrl().isEmpty()) continue;
-                    if (book.getUrl().contains("/imported/")) continue;
-
-                    java.util.ArrayList<com.fanok.audiobooks.pojo.AudioListPOJO> tracks = audioListDBModel.get(book.getUrl());
-                    if (tracks == null || tracks.isEmpty()) continue;
-
-                    File bookDir = getBookDownloadDir(context, book.getUrl(), book.getName(), book.getArtist(), book.getAutor());
-
-                    for (com.fanok.audiobooks.pojo.AudioListPOJO track : tracks) {
-                        String currentUrl = track.getAudioUrl();
-                        if (currentUrl != null && (currentUrl.startsWith("/") || currentUrl.startsWith("file://") || currentUrl.startsWith("content://"))) {
-                            File f = new File(currentUrl.replace("file://", ""));
-                            if (f.exists()) {
-                                if (f.getParent() != null) claimedParents.add(f.getParent());
-                                continue;
-                            }
-                        }
-
-                        String audioName = track.getAudioName();
-                        File foundFile = null;
-                        if (bookDir.exists()) {
-                            foundFile = findFileInDirByName(bookDir, audioName);
-                        }
-
-                        if (foundFile != null && foundFile.exists()) {
-                            try {
-                                com.fanok.audiobooks.room.BooksAudioEntity entity = audioListDBModel.getDatabase().booksAudioDao()
-                                        .getByUrlAndAudioUrl(book.getUrl(), track.getAudioUrl());
-                                if (entity == null && track.getCleanAudioUrl() != null) {
-                                    entity = audioListDBModel.getDatabase().booksAudioDao()
-                                            .getByUrlAndAudioUrl(book.getUrl(), track.getCleanAudioUrl());
-                                }
-                                if (entity != null) {
-                                    entity.urlAudio = foundFile.getAbsolutePath();
-                                    audioListDBModel.getDatabase().booksAudioDao().insert(entity);
-                                    if (foundFile.getParent() != null) claimedParents.add(foundFile.getParent());
-                                }
-                            } catch (Exception e) {
-                                android.util.Log.e("RepairDB", "Error updating track entity", e);
-                            }
-                        }
-                    }
-                }
-
-                // Remove duplicate imported books if original book already claims the files
-                for (BookPOJO book : savedBooks) {
-                    if (book.getUrl() != null && book.getUrl().contains("/imported/")) {
-                        java.util.ArrayList<com.fanok.audiobooks.pojo.AudioListPOJO> tracks = audioListDBModel.get(book.getUrl());
-                        if (tracks != null && !tracks.isEmpty()) {
-                            boolean isDuplicate = false;
-                            for (com.fanok.audiobooks.pojo.AudioListPOJO t : tracks) {
-                                if (t.getAudioUrl() != null) {
-                                    File f = new File(t.getAudioUrl().replace("file://", ""));
-                                    if (f.getParent() != null && claimedParents.contains(f.getParent())) {
-                                        isDuplicate = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (isDuplicate) {
-                                android.util.Log.i("RepairDB", "Removing duplicate imported book: " + book.getUrl());
-                                booksDBModel.removeSaved(book);
-                                audioListDBModel.remove(book.getUrl());
-                            }
-                        }
-                    }
-                }
-
-                booksDBModel.closeDB();
-                audioListDBModel.closeDB();
-
-                Intent intent = new Intent(com.fanok.audiobooks.activity.BookActivity.Broadcast_UPDATE_ADAPTER);
-                context.sendBroadcast(intent);
-            } catch (Exception e) {
-                android.util.Log.e("RepairDB", "Error repairing saved books database", e);
-            }
-        }).start();
+    /** Receives, on the main thread, how many of the chosen chapters were fully deleted. */
+    public interface DeleteCallback {
+        void onDeleted(int deleted, int total);
     }
 
-    public static void deleteChapterFiles(@NonNull Context context, @Nullable String bookUrl, @Nullable BookPOJO book, @NonNull java.util.Set<String> audioUrls, @Nullable java.util.Set<String> chapterNames) {
-        if (context == null || bookUrl == null || bookUrl.isEmpty() || audioUrls == null || audioUrls.isEmpty()) return;
+    /**
+     * Deletes the downloaded copies of the chosen chapters of one book on the storage worker. A chapter is chosen
+     * when its url_audio or its recorded local_uri is in {@code chapterUrls}. Online chapters stay in the list;
+     * chapters of imported books leave the library while their files stay. When no chapter stays downloaded the
+     * book leaves the Saved list.
+     */
+    public static void deleteChapters(@NonNull Context context, @NonNull String bookUrl,
+                                      @NonNull Collection<String> chapterUrls, @Nullable DeleteCallback callback) {
+        final Context app = context.getApplicationContext();
+        final Set<String> chosenUrls = new HashSet<>(chapterUrls);
+        STORAGE.execute(() -> {
+            int deleted = 0;
+            int total = 0;
+            try {
+                AudioListDBModel model = new AudioListDBModel(app);
+                List<BooksAudioEntity> chosen = new ArrayList<>();
+                for (BooksAudioEntity row : model.getRows(bookUrl)) {
+                    if (chosenUrls.contains(row.urlAudio) || (row.localUri != null && chosenUrls.contains(row.localUri))) {
+                        chosen.add(row);
+                    }
+                }
+                total = chosen.size();
+                Set<String> removedIds = new HashSet<>();
+                deleted = applyPlan(app, model, chosen, true, removedIds);
+                if (total > 0 && !anyDownloaded(app, model.getRows(bookUrl), removedIds)) {
+                    model.remove(bookUrl);
+                    new BooksDBModel(app).removeSavedByUrl(bookUrl);
+                }
+            } catch (Exception e) {
+                android.util.Log.e("DownloadStorageHelper", "Error deleting chapters", e);
+            }
+            app.sendBroadcast(new Intent(BookActivity.Broadcast_UPDATE_ADAPTER));
+            if (callback != null) {
+                final int finalDeleted = deleted;
+                final int finalTotal = total;
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                        .post(() -> callback.onDeleted(finalDeleted, finalTotal));
+            }
+        });
+    }
+
+    /**
+     * Removes books from the library on the storage worker: their Media3 downloads, the copies recorded in
+     * local_uri and their rows. Files the app did not write (imported folders) are never touched.
+     */
+    public static void removeBooks(@NonNull Context context, @NonNull Collection<String> bookUrls) {
+        final Context app = context.getApplicationContext();
+        final List<String> urls = new ArrayList<>(bookUrls);
+        STORAGE.execute(() -> {
+            AudioListDBModel model = new AudioListDBModel(app);
+            BooksDBModel books = new BooksDBModel(app);
+            for (String url : urls) {
+                try {
+                    applyPlan(app, model, model.getRows(url), false, new HashSet<>());
+                    books.removeSavedByUrl(url);
+                    Intent cancel = new Intent(app, DownloadActionReceiver.class);
+                    cancel.setAction("CANCEL");
+                    cancel.putExtra("id", url);
+                    app.sendBroadcast(cancel);
+                } catch (Exception e) {
+                    android.util.Log.e("DownloadStorageHelper", "Error removing book " + url, e);
+                }
+            }
+            app.sendBroadcast(new Intent(BookActivity.Broadcast_UPDATE_ADAPTER));
+        });
+    }
+
+    /**
+     * Applies the deletion plan of {@code rows}: removes their Media3 downloads, deletes exactly their recorded
+     * copies, then clears or removes only the rows whose copies are gone. Returns how many rows were fully handled.
+     */
+    private static int applyPlan(@NonNull Context context, @NonNull AudioListDBModel model,
+                                 @NonNull List<BooksAudioEntity> rows, boolean keepOnlineRows,
+                                 @NonNull Set<String> removedIds) {
+        List<DeletionPlanner.Row> planRows = new ArrayList<>();
+        for (BooksAudioEntity row : rows) {
+            planRows.add(new DeletionPlanner.Row(row.urlBook, row.urlAudio, row.localUri));
+        }
+        List<String> roots = downloadRoots(context);
+        DeletionPlanner.Plan plan = DeletionPlanner.plan(planRows, roots, keepOnlineRows, DownloadStorageHelper::downloadIdOf);
+
+        DownloadIndex index = null;
+        try {
+            index = DownloadUtil.getDownloadManager().getDownloadIndex();
+        } catch (Exception ignored) {
+        }
+        Set<String> failed = new HashSet<>();
+        for (String id : plan.downloadIdsToRemove) {
+            try {
+                if (index == null || index.getDownload(id) != null) {
+                    DownloadService.sendRemoveDownload(context, ExoDownloadService.class, id, false);
+                }
+                removedIds.add(id);
+            } catch (Exception e) {
+                failed.add(id);
+                android.util.Log.w("DownloadStorageHelper", "Error removing download " + id, e);
+            }
+        }
+        failed.addAll(deleteRecordedUris(context, plan.urisToDelete, roots));
 
         try {
-            com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(context);
-            java.util.ArrayList<com.fanok.audiobooks.pojo.AudioListPOJO> tracks = audioListDBModel.get(bookUrl);
-
-            File bookDir = null;
-            if (book != null) {
-                bookDir = getBookDownloadDir(context, bookUrl, book.getName(), book.getArtist(), book.getAutor());
-            }
-
-            java.util.HashSet<String> allNamesToDelete = new java.util.HashSet<>();
-            if (chapterNames != null) {
-                allNamesToDelete.addAll(chapterNames);
-            }
-
-            for (String audioUrl : audioUrls) {
-                if (audioUrl == null || audioUrl.isEmpty()) continue;
-
-                // 1. Tell ExoPlayer DownloadService to remove download
-                try {
-                    androidx.media3.exoplayer.offline.DownloadService.sendRemoveDownload(
-                            context,
-                            com.fanok.audiobooks.service.ExoDownloadService.class,
-                            audioUrl,
-                            false
-                    );
-                    Uri uri = Uri.parse(audioUrl);
-                    if (uri.getScheme() != null && uri.getAuthority() != null) {
-                        String id = new Uri.Builder()
-                                .scheme(uri.getScheme())
-                                .authority(uri.getAuthority())
-                                .path(uri.getPath())
-                                .build()
-                                .toString();
-                        if (!id.equals(audioUrl)) {
-                            androidx.media3.exoplayer.offline.DownloadService.sendRemoveDownload(
-                                    context,
-                                    com.fanok.audiobooks.service.ExoDownloadService.class,
-                                    id,
-                                    false
-                            );
-                        }
-                    }
-                } catch (Exception e) {
-                    android.util.Log.w("DownloadStorageHelper", "Error removing ExoPlayer download for " + audioUrl, e);
+            model.getDatabase().runInTransaction(() -> {
+                for (DeletionPlanner.Row row : plan.rowsToRemove) {
+                    if (isHandled(row, failed)) model.removeTrack(row.urlBook, row.urlAudio);
                 }
-
-                // 2. Find matching track from DB tracks list
-                if (tracks != null) {
-                    for (com.fanok.audiobooks.pojo.AudioListPOJO t : tracks) {
-                        if (t == null) continue;
-                        boolean isMatch = false;
-
-                        if (audioUrl.equals(t.getAudioUrl()) || audioUrl.equals(t.getCleanAudioUrl())
-                                || (t.getAudioUrl() != null && t.getAudioUrl().contains(audioUrl))
-                                || (t.getCleanAudioUrl() != null && audioUrl.contains(t.getCleanAudioUrl()))) {
-                            isMatch = true;
-                        }
-
-                        if (!isMatch && chapterNames != null && t.getAudioName() != null) {
-                            if (chapterNames.contains(t.getAudioName())) {
-                                isMatch = true;
-                            }
-                        }
-
-                        if (isMatch) {
-                            if (t.getAudioName() != null && !t.getAudioName().isEmpty()) {
-                                allNamesToDelete.add(t.getAudioName());
-                            }
-                            String tUrl = t.getAudioUrl();
-                            if (tUrl != null && !tUrl.isEmpty()) {
-                                if (tUrl.startsWith("content://")) {
-                                    try {
-                                        androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, Uri.parse(tUrl));
-                                        if (doc != null && doc.exists()) doc.delete();
-                                    } catch (Exception ignored) {}
-                                } else if (tUrl.startsWith("file://") || tUrl.startsWith("/")) {
-                                    File f = new File(tUrl.replace("file://", ""));
-                                    if (f.exists()) f.delete();
-                                }
-                            }
-                        }
+                for (DeletionPlanner.Row row : plan.rowsToClearLocalUri) {
+                    if (isHandled(row, failed)) {
+                        model.getDatabase().booksAudioDao().updateLocalUri(row.urlBook, row.urlAudio, null);
                     }
                 }
-
-                // Direct file delete if audioUrl is a local file path
-                if (audioUrl.startsWith("content://")) {
-                    try {
-                        androidx.documentfile.provider.DocumentFile doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, Uri.parse(audioUrl));
-                        if (doc != null && doc.exists()) doc.delete();
-                    } catch (Exception ignored) {}
-                } else if (audioUrl.startsWith("file://") || audioUrl.startsWith("/")) {
-                    File f = new File(audioUrl.replace("file://", ""));
-                    if (f.exists()) f.delete();
-                }
-
-                // 3. Update or remove track entry in DB by URL
-                if (bookUrl.contains("/imported/")) {
-                    audioListDBModel.removeTrack(bookUrl, audioUrl);
-                } else {
-                    try {
-                        com.fanok.audiobooks.room.BooksAudioEntity entity = audioListDBModel.getDatabase().booksAudioDao()
-                                .getByUrlAndAudioUrl(bookUrl, audioUrl);
-                        if (entity == null) {
-                            String cleanUrl = audioUrl;
-                            int q = cleanUrl.indexOf('?');
-                            if (q >= 0) cleanUrl = cleanUrl.substring(0, q);
-                            entity = audioListDBModel.getDatabase().booksAudioDao()
-                                    .getByUrlAndAudioUrl(bookUrl, "%" + cleanUrl + "%");
-                        }
-                        if (entity != null) {
-                            entity.urlAudio = audioUrl;
-                            audioListDBModel.getDatabase().booksAudioDao().insert(entity);
-                        }
-                    } catch (Exception ignored) {}
-                }
-            }
-
-            // 4. Delete physical files matching allNamesToDelete in bookDir and SAF root
-            for (String name : allNamesToDelete) {
-                if (name == null || name.isEmpty()) continue;
-                if (bookUrl.contains("/imported/")) {
-                    audioListDBModel.removeTrack(bookUrl, name);
-                }
-
-                if (bookDir != null && bookDir.exists()) {
-                    deletePhysicalTrackFile(bookDir, name);
-                }
-
-                androidx.documentfile.provider.DocumentFile rootDoc = getRootDocumentFile(context);
-                if (rootDoc != null) {
-                    deleteDocMatching(rootDoc, name, new StringBuilder());
-                }
-            }
-
-            // 5. Check if any downloaded audio files remain for this book
-            boolean hasRemainingDownloaded = false;
-            java.util.ArrayList<com.fanok.audiobooks.pojo.AudioListPOJO> currentTracks = audioListDBModel.get(bookUrl);
-            androidx.media3.exoplayer.offline.DownloadIndex downloadIndex = null;
-            try {
-                downloadIndex = com.fanok.audiobooks.util.DownloadUtil.getDownloadManager().getDownloadIndex();
-            } catch (Exception ignored) {}
-
-            if (currentTracks != null) {
-                for (com.fanok.audiobooks.pojo.AudioListPOJO t : currentTracks) {
-                    if (t == null) continue;
-                    String tUrl = t.getAudioUrl();
-                    if (tUrl != null && !tUrl.isEmpty()) {
-                        if (tUrl.startsWith("content://") || tUrl.startsWith("file://")) {
-                            hasRemainingDownloaded = true;
-                            break;
-                        } else if (tUrl.startsWith("/")) {
-                            if (new File(tUrl).exists()) {
-                                hasRemainingDownloaded = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (downloadIndex != null && t.getCleanAudioUrl() != null && !t.getCleanAudioUrl().isEmpty()) {
-                        try {
-                            androidx.media3.exoplayer.offline.Download d = downloadIndex.getDownload(t.getCleanAudioUrl());
-                            if (d != null && d.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED) {
-                                hasRemainingDownloaded = true;
-                                break;
-                            }
-                        } catch (Exception ignored) {}
-                    }
-                    if (bookDir != null && bookDir.exists() && t.getAudioName() != null && !t.getAudioName().isEmpty()) {
-                        String sanitized = sanitizeFileName(t.getAudioName());
-                        File trackFile = new File(bookDir, sanitized + ".mp3");
-                        if (trackFile.exists()) {
-                            hasRemainingDownloaded = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (!hasRemainingDownloaded) {
-                deleteBookFiles(context, bookUrl, book);
-                com.fanok.audiobooks.model.BooksDBModel booksDBModel = new com.fanok.audiobooks.model.BooksDBModel(context);
-                if (book != null) booksDBModel.removeSaved(book);
-                booksDBModel.removeSavedByUrl(bookUrl);
-                booksDBModel.closeDB();
-                audioListDBModel.remove(bookUrl);
-            }
-
-            audioListDBModel.closeDB();
-
-            Intent intent = new Intent(com.fanok.audiobooks.activity.BookActivity.Broadcast_UPDATE_ADAPTER);
-            context.sendBroadcast(intent);
-
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                try {
-                    context.sendBroadcast(new Intent(com.fanok.audiobooks.activity.BookActivity.Broadcast_UPDATE_ADAPTER));
-                } catch (Exception ignored) {}
-            }, 600);
-
+            });
         } catch (Exception e) {
-            android.util.Log.e("DownloadStorageHelper", "Error deleting chapter files", e);
+            android.util.Log.e("DownloadStorageHelper", "Error updating deleted chapters", e);
+            return 0;
+        }
+        int handled = 0;
+        for (DeletionPlanner.Row row : planRows) {
+            if (isHandled(row, failed)) handled++;
+        }
+        return handled;
+    }
+
+    private static boolean isHandled(@NonNull DeletionPlanner.Row row, @NonNull Set<String> failed) {
+        return !failed.contains(row.localUri)
+                && !(DeletionPlanner.isRemote(row.urlAudio) && failed.contains(downloadIdOf(row.urlAudio)));
+    }
+
+    /** True while a row still has a local copy or a completed Media3 download that is not being removed. */
+    private static boolean anyDownloaded(@NonNull Context context, @NonNull List<BooksAudioEntity> rows,
+                                         @NonNull Set<String> removedIds) {
+        DownloadIndex index = null;
+        try {
+            index = DownloadUtil.getDownloadManager().getDownloadIndex();
+        } catch (Exception ignored) {
+        }
+        for (BooksAudioEntity row : rows) {
+            if (localCopyOf(context, row) != null) return true;
+            if (index != null && DeletionPlanner.isRemote(row.urlAudio)) {
+                String id = downloadIdOf(row.urlAudio);
+                try {
+                    Download download = index.getDownload(id);
+                    if (!removedIds.contains(id) && download != null && download.state == Download.STATE_COMPLETED) {
+                        return true;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Roots the exporter writes below (and the selected SAF tree); folders are pruned only strictly inside them. */
+    @NonNull
+    private static List<String> downloadRoots(@NonNull Context context) {
+        List<String> roots = new ArrayList<>();
+        roots.add(getDownloadPath(context));
+        String defaultPath = getDefaultPath(context);
+        if (!roots.contains(defaultPath)) roots.add(defaultPath);
+        String tree = getSavedUriString(context);
+        if (tree != null && !tree.isEmpty()) roots.add(tree);
+        return roots;
+    }
+
+    /**
+     * Deletes exactly the given recorded copies (content:// through SAF, file:// and plain paths through File), then
+     * prunes the folders above each one that are now empty, stopping below its root. Returns the URIs still present.
+     */
+    @NonNull
+    public static Set<String> deleteRecordedUris(@NonNull Context context, @NonNull Collection<String> uris,
+                                                 @NonNull Collection<String> roots) {
+        Set<String> failed = new HashSet<>();
+        for (String uri : uris) {
+            try {
+                if (!deleteRecordedUri(context, uri, roots)) failed.add(uri);
+            } catch (Exception e) {
+                failed.add(uri);
+                android.util.Log.w("DownloadStorageHelper", "Error deleting " + uri, e);
+            }
+        }
+        return failed;
+    }
+
+    private static boolean deleteRecordedUri(@NonNull Context context, @NonNull String uri,
+                                             @NonNull Collection<String> roots) {
+        if (uri.startsWith("content://")) {
+            Uri docUri = Uri.parse(uri);
+            List<String> folders = safFoldersAbove(context, docUri);
+            DocumentFile doc = DocumentFile.fromSingleUri(context, docUri);
+            boolean gone = doc == null || doc.delete() || !doc.exists();
+            if (gone) pruneEmptySafFolders(context, docUri, folders);
+            return gone;
+        }
+        File file = new File(uri.startsWith("file://") ? Uri.parse(uri).getPath() : uri);
+        boolean gone = file.delete() || !file.exists();
+        if (gone) pruneEmptyFolders(file.getParentFile(), DeletionPlanner.enclosingRoot(file.getAbsolutePath(), roots));
+        return gone;
+    }
+
+    /** Deletes {@code dir} and then its parents while each is empty and strictly below {@code root}. */
+    private static void pruneEmptyFolders(@Nullable File dir, @Nullable String root) {
+        if (root == null) return;
+        while (dir != null && dir.getAbsolutePath().startsWith(root + "/")) {
+            String[] children = dir.list();
+            if (children == null || children.length > 0 || !dir.delete()) return;
+            dir = dir.getParentFile();
         }
     }
 
-    public static void deleteChapterFiles(@NonNull Context context, @Nullable String bookUrl, @Nullable BookPOJO book, @NonNull java.util.Set<String> audioUrls) {
-        deleteChapterFiles(context, bookUrl, book, audioUrls, null);
+    /** Document ids of the folders between the tree root (excluded) and the document (excluded), nearest last. */
+    @NonNull
+    private static List<String> safFoldersAbove(@NonNull Context context, @NonNull Uri docUri) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !DocumentsContract.isTreeUri(docUri)) {
+            return Collections.emptyList();
+        }
+        try {
+            DocumentsContract.Path path = DocumentsContract.findDocumentPath(context.getContentResolver(), docUri);
+            List<String> ids = path != null ? path.getPath() : null;
+            if (ids == null || ids.size() < 3) return Collections.emptyList();
+            return new ArrayList<>(ids.subList(1, ids.size() - 1));
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
     }
 
-    private static void deletePhysicalTrackFile(@NonNull File dir, @NonNull String audioName) {
-        if (!dir.exists() || !dir.isDirectory()) return;
-
-        String sanitized = sanitizeFileName(audioName);
-        String normName = normalizeForComparison(audioName);
-        String normSanitized = normalizeForComparison(sanitized);
-
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (f.isFile()) {
-                    String fname = f.getName();
-                    int dot = fname.lastIndexOf('.');
-                    String nameNoExt = dot > 0 ? fname.substring(0, dot) : fname;
-                    String normFile = normalizeForComparison(nameNoExt);
-                    String normFullFile = normalizeForComparison(fname);
-                    if (normFile.equals(normName) || normFile.equals(normSanitized)
-                            || normFullFile.equals(normName) || normFullFile.equals(normSanitized)
-                            || (!normFile.isEmpty() && normName.contains(normFile))
-                            || (!normFile.isEmpty() && normSanitized.contains(normFile))) {
-                        f.delete();
-                    }
-                } else if (f.isDirectory()) {
-                    deletePhysicalTrackFile(f, audioName);
+    /** SAF deletes folders recursively, so a folder is deleted only after a query shows it has no children. */
+    private static void pruneEmptySafFolders(@NonNull Context context, @NonNull Uri docUri, @NonNull List<String> folders) {
+        android.content.ContentResolver resolver = context.getContentResolver();
+        for (int k = folders.size() - 1; k >= 0; k--) {
+            Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(docUri, folders.get(k));
+            int count;
+            try (android.database.Cursor cursor = resolver.query(children,
+                    new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID}, null, null, null)) {
+                count = cursor != null ? cursor.getCount() : -1;
+            } catch (Exception e) {
+                return;
+            }
+            try {
+                if (count != 0 || !DocumentsContract.deleteDocument(resolver,
+                        DocumentsContract.buildDocumentUriUsingTree(docUri, folders.get(k)))) {
+                    return;
                 }
+            } catch (Exception e) {
+                return;
             }
         }
     }

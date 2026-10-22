@@ -140,6 +140,8 @@
     <string name="clear">Очистить</string>
     <string name="backup_created">Резервная копия создана.</string>
     <string name="backup_not_created">Не удалось создать резервную копию!</string>
+    <string name="import_partial">Импорт выполнен частично: достигнут лимит страниц.</string>
+    <string name="backup_created_skipped">Резервная копия создана. Пропущено повреждённых записей: %1$d.</string>
     <string name="worning_not_allowed_write_storege">Приложению не было разрешено записывать данные хранилище.</string>
     <string name="restored">Данные успешно восстановлены.</string>
     <string name="error_restored">Ошибка восстановления!</string>
@@ -314,6 +316,7 @@
     <string name="open_4pda">Открыть тему на 4pda</string>
     <string name="dowland_delete">Скачать/Удалить</string>
     <string name="delete_complite">Удаление завершено</string>
+    <string name="delete_result">Удалено %1$d из %2$d</string>
     <string name="seekTo">Перемотка</string>
     <string name="seekToPauseDesc">Снимать плеер с паузы во время перемотки</string>
     <string name="scrollToSelected">Переход к активному файлу</string>

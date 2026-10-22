@@ -205,11 +205,8 @@ public class ExoDownloadService extends DownloadService {
                     }
                 }
 
-                String fileName = DownloadStorageHelper.sanitizeFileName(audioName);
-                if (!fileName.toLowerCase().endsWith(".mp3") && !fileName.toLowerCase().endsWith(".ts") && !fileName.toLowerCase().endsWith(".aac") && !fileName.toLowerCase().endsWith(".m4a")) {
-                    fileName += ".mp3";
-                }
-                File targetFile = new File(targetDir, fileName);
+                String fileName = DownloadStorageHelper.exportFileNameFor(context, book.getUrl(), download.request.id,
+                        audioName, com.fanok.audiobooks.util.StorageNames.audioExtension(download.request.id, "mp3"));
 
                 androidx.media3.datasource.cache.Cache cache = DownloadUtil.getDownloadCache();
                 java.util.Set<String> keys = cache.getKeys();
@@ -260,6 +257,7 @@ public class ExoDownloadService extends DownloadService {
                 }
                 if (!spanList.isEmpty()) {
                     String[] finalPathOrUri = new String[1];
+                    boolean written = false;
                     try (java.io.OutputStream fos = DownloadStorageHelper.openOutputStreamForExport(
                             context, book.getUrl(), book.getName(), book.getArtist(), book.getAutor(),
                             fileName, "audio/mpeg", finalPathOrUri)) {
@@ -273,26 +271,16 @@ public class ExoDownloadService extends DownloadService {
                                 }
                             }
                         }
+                        written = true;
                     } catch (Exception e) {
                         android.util.Log.e("DL", "Failed writing exported file", e);
                     }
 
-                    if (finalPathOrUri[0] != null && !finalPathOrUri[0].isEmpty()) {
+                    if (written && finalPathOrUri[0] != null && !finalPathOrUri[0].isEmpty()) {
                         try {
-                            AudioListDBModel dbModel = new AudioListDBModel(context);
-                            com.fanok.audiobooks.room.BooksAudioEntity entity = dbModel.getDatabase().booksAudioDao()
-                                    .getByUrlAndAudioUrl(book.getUrl(), download.request.id);
-                            if (entity == null && download.request.uri != null) {
-                                entity = dbModel.getDatabase().booksAudioDao()
-                                        .getByUrlAndAudioUrl(book.getUrl(), download.request.uri.toString());
-                            }
-                            if (entity != null) {
-                                entity.urlAudio = finalPathOrUri[0];
-                                dbModel.getDatabase().booksAudioDao().insert(entity);
-                            }
-                            dbModel.closeDB();
+                            new AudioListDBModel(context).setLocalUri(book.getUrl(), download.request.id, finalPathOrUri[0]);
                         } catch (Exception e) {
-                            android.util.Log.e("DL", "Failed to update track URL to local path in DB", e);
+                            android.util.Log.e("DL", "Failed to record the exported copy in DB", e);
                         }
                     }
                 }
@@ -424,14 +412,8 @@ public class ExoDownloadService extends DownloadService {
                     }
                 }
 
-                String baseName = com.fanok.audiobooks.util.DownloadStorageHelper.sanitizeFileName(audioName);
-                if (baseName.toLowerCase().endsWith(".ts") || baseName.toLowerCase().endsWith(".aac")
-                        || baseName.toLowerCase().endsWith(".mp3") || baseName.toLowerCase().endsWith(".m4a")
-                        || baseName.toLowerCase().endsWith(".ogg") || baseName.toLowerCase().endsWith(".flac")) {
-                    int dot = baseName.lastIndexOf('.');
-                    if (dot > 0) baseName = baseName.substring(0, dot);
-                }
-                String fullFileName = baseName + ext;
+                String fullFileName = DownloadStorageHelper.exportFileNameFor(context, book.getUrl(), download.request.id,
+                        audioName, ext);
                 String[] finalPathOrUri = new String[1];
                 try (java.io.OutputStream os = DownloadStorageHelper.openOutputStreamForExport(
                         context, book.getUrl(), book.getName(), book.getArtist(), book.getAutor(),
@@ -441,20 +423,9 @@ public class ExoDownloadService extends DownloadService {
 
                 if (finalPathOrUri[0] != null && !finalPathOrUri[0].isEmpty()) {
                     try {
-                        AudioListDBModel dbModel = new AudioListDBModel(context);
-                        com.fanok.audiobooks.room.BooksAudioEntity entity = dbModel.getDatabase().booksAudioDao()
-                                .getByUrlAndAudioUrl(book.getUrl(), download.request.id);
-                        if (entity == null && download.request.uri != null) {
-                            entity = dbModel.getDatabase().booksAudioDao()
-                                    .getByUrlAndAudioUrl(book.getUrl(), download.request.uri.toString());
-                        }
-                        if (entity != null) {
-                            entity.urlAudio = finalPathOrUri[0];
-                            dbModel.getDatabase().booksAudioDao().insert(entity);
-                        }
-                        dbModel.closeDB();
+                        new AudioListDBModel(context).setLocalUri(book.getUrl(), download.request.id, finalPathOrUri[0]);
                     } catch (Exception e) {
-                        android.util.Log.e("DL", "Failed to update HLS track URL to local path in DB", e);
+                        android.util.Log.e("DL", "Failed to record the exported HLS copy in DB", e);
                     }
                 }
             } catch (Exception e) {
@@ -777,7 +748,11 @@ public class ExoDownloadService extends DownloadService {
                     android.util.Log.w("DL", "Error checking remaining downloads", e);
                 }
 
-                if (!hasOtherDownloads) {
+                boolean hasCopies = false;
+                for (com.fanok.audiobooks.room.BooksAudioEntity row : new AudioListDBModel(downloadService).getRows(bookUrl)) {
+                    hasCopies |= row.localUri != null;
+                }
+                if (!hasOtherDownloads && !hasCopies) {
                     BooksDBModel dbModel = new BooksDBModel(downloadService);
                     if (book != null) {
                         dbModel.removeSaved(book);

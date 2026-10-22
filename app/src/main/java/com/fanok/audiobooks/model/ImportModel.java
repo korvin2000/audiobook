@@ -9,11 +9,16 @@ import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.reactivex.Observable;
+import io.reactivex.Single;
+import io.reactivex.SingleEmitter;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jetbrains.annotations.NotNull;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
@@ -22,6 +27,9 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 public class ImportModel {
+
+    /** Hard cap on akniga list pages requested by one import. */
+    private static final int MAX_PAGES = 200;
 
     private final Context mContext;
 
@@ -41,7 +49,7 @@ public class ImportModel {
         this.src = src;
     }
 
-    private boolean importBooks() throws IOException {
+    private boolean importBooks(SingleEmitter<?> emitter) throws IOException {
         Document document = Jsoup.connect(getUserUrl() + "fav/")
                 .cookies(getCookiesAuth())
                 .userAgent(Consts.USER_AGENT)
@@ -53,55 +61,74 @@ public class ImportModel {
         if (booksListParent != null) {
             Elements booksList = booksListParent.getElementsByClass("books_carousel");
             if (booksList.size() != 0) {
-                Elements aList = booksList.first().getElementsByTag("a");
-                BooksDBModel booksDBModel = new BooksDBModel(mContext);
-                for (Element a : aList) {
-                    String url = Url.SERVER + a.attr("href");
-                    if (!booksDBModel.inFavorite(url)) {
-                        booksDBModel.addFavorite(BookPOJO.getBookByUrl(url));
-                    }
-
+                Set<String> urls = new LinkedHashSet<>();
+                for (Element a : booksList.first().getElementsByTag("a")) {
+                    urls.add(Url.SERVER + a.attr("href"));
                 }
-                booksDBModel.closeDB();
+                addFavorites(urls, BookPOJO::getBookByUrl, emitter);
             }
             return true;
         }
         return false;
     }
 
-    public Observable<Integer> importBooks(@NonNull String username, @NotNull String password) {
-        return Observable.create(observableEmitter -> {
-            //waitVpnConetion();
+    /**
+     * Emits exactly one terminal signal: the message to show on success, or the error. Nothing is stored
+     * unless every book was loaded, and then all are stored in one transaction.
+     */
+    public Single<Integer> importBooks(@NonNull String username, @NotNull String password) {
+        return Single.create(emitter -> {
+            int message;
             try {
                 if (src == Consts.IMPORT_SITE_KNIGA_V_UHE) {
                     if (!login(username, password)) {
-                        observableEmitter.onNext(R.string.incorect_login_or_password);
+                        message = R.string.incorect_login_or_password;
                     } else {
-                        if (importBooks()) {
-                            observableEmitter.onNext(R.string.import_complite);
-                        } else {
-                            observableEmitter.onNext(R.string.error_import);
-                        }
+                        message = importBooks(emitter) ? R.string.import_complite : R.string.error_import;
                     }
                 } else if (src == Consts.IMPORT_SITE_ABOOK) {
                     if (!loginAbook(username, password)) {
-                        observableEmitter.onNext(R.string.incorect_login_or_password);
+                        message = R.string.incorect_login_or_password;
                     } else {
-                        if (importBooksAbook()) {
-                            observableEmitter.onNext(R.string.import_complite);
-                        } else {
-                            observableEmitter.onNext(R.string.error_import);
-                        }
+                        message = importBooksAbook(emitter);
                     }
                 } else {
-                    observableEmitter.onNext(R.string.worong_data_sorce);
+                    message = R.string.worong_data_sorce;
                 }
             } catch (Exception e) {
-                observableEmitter.onError(e);
-            } finally {
-                observableEmitter.onComplete();
+                emitter.tryOnError(e);
+                return;
             }
+            emitter.onSuccess(message);
         });
+    }
+
+    private interface BookLoader {
+        BookPOJO load(String url) throws IOException;
+    }
+
+    private void addFavorites(Collection<String> urls, BookLoader loader, SingleEmitter<?> emitter)
+            throws IOException {
+        BooksDBModel booksDBModel = new BooksDBModel(mContext);
+        List<BookPOJO> books = new ArrayList<>();
+        for (String url : urls) {
+            if (emitter.isDisposed()) {
+                return;
+            }
+            if (!booksDBModel.inFavorite(url)) {
+                books.add(loader.load(url));
+            }
+        }
+        if (emitter.isDisposed()) {
+            return;
+        }
+        booksDBModel.addFavorites(books);
+    }
+
+    /** True when the akniga list page links to a further page. */
+    static boolean hasNextPage(@NonNull Document page) {
+        Elements nav = page.getElementsByClass("page__nav");
+        return !nav.isEmpty() && !nav.first().getElementsByClass("page__nav--next").isEmpty();
     }
 
     private Map<String, String> getCookies() {
@@ -120,11 +147,11 @@ public class ImportModel {
         return userUrl;
     }
 
-    private boolean importBooksAbook() throws IOException {
+    /** Returns the message to show: complete, or partial when the page cap was reached with pages left. */
+    private int importBooksAbook(SingleEmitter<?> emitter) throws IOException {
+        Set<String> urls = new LinkedHashSet<>();
         int page = 1;
-        BooksDBModel booksDBModel = new BooksDBModel(mContext);
-        boolean end = false;
-        while (true) {
+        for (; page <= MAX_PAGES && !emitter.isDisposed(); page++) {
             Document document = Jsoup.connect(getUserUrl() + "/books/page" + page + "/")
                     .cookies(getCookiesAuth())
                     .userAgent(Consts.USER_AGENT)
@@ -132,18 +159,6 @@ public class ImportModel {
                     .referrer(Url.SERVER_AKNIGA)
                     .maxBodySize(0)
                     .get();
-            Elements bootom = document.getElementsByClass("page__nav");
-            if (bootom != null && bootom.size() != 0) {
-                Elements nextButton = bootom.get(0).getElementsByClass("page__nav--next");
-                if (!(nextButton != null && nextButton.size() != 0)) {
-                    if (end) {
-                        return true;
-                    }
-                    end = true;
-                }
-            } else if (page > 1) {
-                return true;
-            }
 
             Elements listElements = document.getElementsByClass("content__main__articles--item");
             if (listElements != null && listElements.size() != 0) {
@@ -163,16 +178,19 @@ public class ImportModel {
                     if (link != null && link.size() != 0) {
                         String src = link.first().attr("href");
                         if (src != null && !src.isEmpty()) {
-                            if (!booksDBModel.inFavorite(src)) {
-                                booksDBModel.addFavorite(BookPOJO.getBookByUrlAbook(src));
-                            }
+                            urls.add(src);
                         }
                     }
                 }
             }
 
-            page++;
+            if (listElements.isEmpty() || !hasNextPage(document)) {
+                break;
+            }
         }
+        boolean partial = page > MAX_PAGES;
+        addFavorites(urls, BookPOJO::getBookByUrlAbook, emitter);
+        return partial ? R.string.import_partial : R.string.import_complite;
     }
 
     private boolean login(@NotNull String username, @NotNull String password) throws IOException {
@@ -201,8 +219,11 @@ public class ImportModel {
                 JsonArray jsonArray = root.getAsJsonArray();
                 for (int i = 0; i < jsonArray.size(); i++) {
                     if (jsonArray.get(i).isJsonObject()) {
-                        JsonObject jsonObject = jsonArray.get(i).getAsJsonObject();
-                        userUrl = Url.SERVER + jsonObject.get("url").getAsString();
+                        JsonElement url = jsonArray.get(i).getAsJsonObject().get("url");
+                        if (url == null || !url.isJsonPrimitive()) {
+                            return false;
+                        }
+                        userUrl = Url.SERVER + url.getAsString();
                         return true;
                     }
                 }
@@ -237,7 +258,7 @@ public class ImportModel {
         JsonElement root = JsonParser.parseString(json);
         if (root.isJsonObject()) {
             JsonElement sMsg = root.getAsJsonObject().get("sMsg");
-            if (!sMsg.isJsonNull() && sMsg.isJsonPrimitive()) {
+            if (sMsg != null && sMsg.isJsonPrimitive()) {
                 String text = sMsg.getAsString();
                 if (text == null || text.contains("Неправильно указан логин (e-mail) или пароль!")) {
                     return false;

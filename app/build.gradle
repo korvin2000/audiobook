@@ -40,6 +40,9 @@ android {
         versionCode 95
         versionName "7.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        sourceSets {
+            androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
+        }
         vectorDrawables.useSupportLibrary = true
         signingConfig signingConfigs.release
 
@@ -134,5 +137,6 @@ dependencies {
     implementation "androidx.room:room-runtime:$room_version"
     annotationProcessor "androidx.room:room-compiler:$room_version"
     implementation "androidx.room:room-rxjava2:$room_version"
+    androidTestImplementation 'androidx.room:room-testing:2.8.4'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }
