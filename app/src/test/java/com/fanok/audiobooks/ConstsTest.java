@@ -2,8 +2,12 @@ package com.fanok.audiobooks;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
+import android.view.KeyEvent;
+import com.fanok.audiobooks.presenter.BookPresenter;
 import java.net.InetAddress;
 import java.net.Socket;
 import javax.net.ssl.HostnameVerifier;
@@ -79,5 +83,19 @@ public class ConstsTest {
         assertFalse(c.getName(), TrustManager.class.isAssignableFrom(c));
         assertFalse(c.getName(), HostnameVerifier.class.isAssignableFrom(c));
         assertFalse(c.getName(), SSLSocketFactory.class.isAssignableFrom(c));
+    }
+
+    /** PLAY-05: PLAY only plays and PAUSE only pauses (a PAUSE while paused stays paused); PLAY_PAUSE toggles. */
+    @Test
+    public void mediaKeysMapToTheirOwnCommands() {
+        assertEquals(BookPresenter.Broadcast_RESUME, Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_MEDIA_PLAY));
+        assertEquals(BookPresenter.Broadcast_PAUSE, Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_MEDIA_PAUSE));
+        assertEquals(BookPresenter.Broadcast_PLAY, Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE));
+        assertNotEquals(BookPresenter.Broadcast_RESUME, BookPresenter.Broadcast_PLAY);
+        assertNotEquals(BookPresenter.Broadcast_PAUSE, BookPresenter.Broadcast_PLAY);
+        assertEquals(BookPresenter.Broadcast_PLAY_NEXT, Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_MEDIA_NEXT));
+        assertEquals(BookPresenter.Broadcast_PLAY_PREVIOUS,
+                Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_MEDIA_PREVIOUS));
+        assertNull(Consts.mediaKeyBroadcast(KeyEvent.KEYCODE_A));
     }
 }

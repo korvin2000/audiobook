@@ -4,9 +4,6 @@ import static android.view.KeyEvent.KEYCODE_MEDIA_PLAY;
 import static android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
 import static com.fanok.audiobooks.Consts.handleUserInput;
 import static com.fanok.audiobooks.Consts.isServiceRunning;
-import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_ENABLED;
-import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_PREFERENCES;
-import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_PASSWORD;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_SHOW_TITLE;
 import static com.fanok.audiobooks.service.MediaPlayerService.countAudioWereShowingRatingPopUp;
 
@@ -58,6 +55,7 @@ import androidx.appcompat.widget.AppCompatSeekBar;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.Lifecycle;
 import androidx.media3.common.util.UnstableApi;
 import androidx.preference.PreferenceManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -71,7 +69,6 @@ import com.arellomobile.mvp.presenter.ProvidePresenter;
 import com.evgenii.jsevaluator.JsEvaluator;
 import com.evgenii.jsevaluator.interfaces.JsCallback;
 import com.fanok.audiobooks.Consts;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.TvSeekBar;
 import com.fanok.audiobooks.Url;
@@ -81,6 +78,7 @@ import com.fanok.audiobooks.interface_pacatge.book_content.Activity;
 import com.fanok.audiobooks.pojo.AudioPOJO;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.presenter.BookPresenter;
 import com.fanok.audiobooks.service.MediaPlayerService;
 import com.fanok.audiobooks.android_equalizer.DialogEqualizerFragment;
@@ -206,25 +204,38 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
     };
 
 
+    /** The player's audio session for an equalizer dialog that arrived while this screen was not resumed, or 0. */
+    private int pendingEqualizerSession;
+
     private final BroadcastReceiver showEqualizer = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             int sessionId = intent.getIntExtra("id", 0);
-            if (sessionId > 0) {
-                try {
-                    DialogEqualizerFragment fragment = DialogEqualizerFragment.newBuilder()
-                            .setAudioSessionId(sessionId)
-                            .themeColor(ContextCompat.getColor(context, R.color.primaryColorEq))
-                            .textColor(ContextCompat.getColor(context, R.color.textColor))
-                            .setAccentColor(ContextCompat.getColor(context, R.color.secondaryColor))
-                            .build();
-
-                    fragment.show(getSupportFragmentManager(), "eq");
-                } catch (IllegalStateException ignored) {
-                }
+            if (sessionId <= 0) {
+                return;
+            }
+            if (getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.RESUMED)) {
+                showEqualizer(sessionId);
+            } else {
+                //a dialog cannot be shown now: onResume shows it
+                pendingEqualizerSession = sessionId;
             }
         }
     };
+
+    private void showEqualizer(int sessionId) {
+        try {
+            DialogEqualizerFragment fragment = DialogEqualizerFragment.newBuilder()
+                    .setAudioSessionId(sessionId)
+                    .themeColor(ContextCompat.getColor(this, R.color.primaryColorEq))
+                    .textColor(ContextCompat.getColor(this, R.color.textColor))
+                    .setAccentColor(ContextCompat.getColor(this, R.color.secondaryColor))
+                    .build();
+
+            fragment.show(getSupportFragmentManager(), "eq");
+        } catch (IllegalStateException ignored) {
+        }
+    }
 
 
     private final BroadcastReceiver updateAdapter = new BroadcastReceiver() {
@@ -246,11 +257,8 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         intent.putExtra("notificationClick", notificationClick);
         String json = new GsonBuilder().serializeNulls().create().toJson(bookPOJO);
         intent.putExtra(ARG_BOOK, json);
-        SharedPreferences preferences =
-                context.getSharedPreferences(PARENTAL_CONTROL_PREFERENCES, MODE_PRIVATE);
-        if (preferences.getBoolean(PARENTAL_CONTROL_ENABLED, false) &&
-                bookPOJO.getGenre() != null &&
-                !preferences.getBoolean(bookPOJO.getGenre(), false) && !notificationClick) {
+        //one policy for every way in; a "notificationClick" extra is never a reason to skip it
+        if (!ParentalControl.isAllowed(context, bookPOJO)) {
 
             XmlPullParser parser = context.getResources().getXml(R.xml.pin_entry);
             try {
@@ -277,18 +285,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
                 editText.requestFocus();
                 Button b = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
                 b.setEnabled(false);
-                b.setOnClickListener(view -> {
-                    if (preferences.getInt(PARENTAL_PASSWORD, 0) == Integer.parseInt(
-                            editText.getText().toString())) {
-                        dialog.cancel();
-                        context.startActivity(intent);
-                    } else {
-                        Toast.makeText(context,
-                                context.getString(R.string.incorect_password),
-                                Toast.LENGTH_SHORT).show();
-                        editText.getText().clear();
-                    }
-                });
+                b.setOnClickListener(view -> openWithPin(context, editText, dialog, intent));
             });
 
             editText.addTextChangedListener(new TextWatcher() {
@@ -309,23 +306,26 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
                 }
             });
 
-            editText.setOnPinEnteredListener(str -> {
-                if (preferences.getInt(PARENTAL_PASSWORD, 0) == Integer.parseInt(
-                        Objects.requireNonNull(editText.getText()).toString())) {
-                    dialog.cancel();
-                    context.startActivity(intent);
-                } else {
-                    Toast.makeText(context,
-                            context.getString(R.string.incorect_password),
-                            Toast.LENGTH_SHORT).show();
-                    editText.getText().clear();
-                }
-            });
+            editText.setOnPinEnteredListener(str -> openWithPin(context, editText, dialog, intent));
 
             dialog.show();
 
         } else {
             context.startActivity(intent);
+        }
+    }
+
+    /** Opens the book when the PIN is right; otherwise says why not (wrong, or locked for a while). */
+    private static void openWithPin(@NonNull Context context, @NonNull PinEntryEditText editText,
+            @NonNull AlertDialog dialog, @NonNull Intent intent) {
+        ParentalControl.Verdict verdict = ParentalControl.verifyPin(context,
+                Objects.requireNonNull(editText.getText()).toString());
+        if (verdict.result == ParentalControl.Result.OK) {
+            dialog.cancel();
+            context.startActivity(intent);
+        } else {
+            Toast.makeText(context, ParentalControlActivity.pinMessage(context, verdict), Toast.LENGTH_SHORT).show();
+            editText.getText().clear();
         }
     }
 
@@ -360,11 +360,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         String json = intent.getStringExtra(ARG_BOOK);
         if (json == null) throw new NullPointerException();
         return new BookPresenter(BookPOJO.parceJsonToBookPojo(json), getApplicationContext());
-    }
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
     }
 
     @UnstableApi
@@ -447,15 +442,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         if (mButtonCollapse != null && mButtonCollapse.getVisibility() != View.INVISIBLE) {
             mButtonCollapse.setVisibility(View.INVISIBLE);
         }
-
-
-        registerInternalReceiver(setImage, Broadcast_SET_IMAGE);
-        registerInternalReceiver(setProgress, Broadcast_SET_PROGRESS);
-        registerInternalReceiver(setSelectionBroadcast, Broadcast_SET_SELECTION);
-        registerInternalReceiver(setTitleBroadcast, Broadcast_SET_TITLE);
-        registerInternalReceiver(showRating, Broadcast_SHOW_RATING);
-        registerInternalReceiver(updateAdapter, Broadcast_UPDATE_ADAPTER);
-        registerInternalReceiver(showEqualizer, Broadcast_SHOW_EQUALIZER);
 
 
 
@@ -939,8 +925,29 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         return (super.onOptionsItemSelected(menuItem));
     }
 
+    /** The player UI listens only while visible; on the way back the service resends chapter, icon and progress. */
+    @Override
+    protected void onStart() {
+        super.onStart();
+        registerInternalReceiver(setImage, Broadcast_SET_IMAGE);
+        registerInternalReceiver(setProgress, Broadcast_SET_PROGRESS);
+        registerInternalReceiver(setSelectionBroadcast, Broadcast_SET_SELECTION);
+        registerInternalReceiver(setTitleBroadcast, Broadcast_SET_TITLE);
+        registerInternalReceiver(showRating, Broadcast_SHOW_RATING);
+        registerInternalReceiver(updateAdapter, Broadcast_UPDATE_ADAPTER);
+        registerInternalReceiver(showEqualizer, Broadcast_SHOW_EQUALIZER);
+        broadcastSend(new Intent(Broadcast_SHOW_TITLE));
+    }
+
     @Override
     protected void onStop() {
+        unregisterReceiver(setImage);
+        unregisterReceiver(setProgress);
+        unregisterReceiver(setSelectionBroadcast);
+        unregisterReceiver(setTitleBroadcast);
+        unregisterReceiver(showRating);
+        unregisterReceiver(updateAdapter);
+        unregisterReceiver(showEqualizer);
         mPresenter.onStop();
         super.onStop();
     }
@@ -953,13 +960,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     @Override
     protected void onDestroy() {
-        unregisterReceiver(setImage);
-        unregisterReceiver(setProgress);
-        unregisterReceiver(setSelectionBroadcast);
-        unregisterReceiver(setTitleBroadcast);
-        unregisterReceiver(showRating);
-        unregisterReceiver(updateAdapter);
-        unregisterReceiver(showEqualizer);
         showingView = "";
         //Moxy destroys the presenter (and its player binding) when this screen is finished for good
         super.onDestroy();
@@ -1155,10 +1155,13 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     @Override
     public void setImageDrawable(int id) {
+        String label = getString(id == R.drawable.ic_pause ? R.string.pause : R.string.play);
         if (mPlayTop != null) {
             mPlayTop.setImageResource(id);
+            mPlayTop.setContentDescription(label);
         }
         mPlayBottom.setImageResource(id);
+        mPlayBottom.setContentDescription(label);
     }
 
     @UnstableApi
@@ -1276,6 +1279,11 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingEqualizerSession > 0) {
+            int sessionId = pendingEqualizerSession;
+            pendingEqualizerSession = 0;
+            showEqualizer(sessionId);
+        }
         showingView = mBookPOJO.getUrl();
         View decorView = getWindow().getDecorView();
         int uiOptions = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;

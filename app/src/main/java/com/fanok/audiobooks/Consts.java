@@ -2,9 +2,11 @@ package com.fanok.audiobooks;
 
 
 import static android.content.Context.ACTIVITY_SERVICE;
+import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PAUSE;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_NEXT;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_PREVIOUS;
+import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_RESUME;
 
 import android.app.ActivityManager;
 import android.content.Context;
@@ -16,6 +18,7 @@ import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.MenuItem;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.graphics.drawable.DrawableCompat;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -183,31 +186,37 @@ public class Consts {
         return -1;
     }
 
-    public static boolean handleUserInput(@NonNull Context context, int keycode) {
-        Log.d(TAG, "Keycode " + keycode);
-        Intent broadcastIntent;
+    /** The player command broadcast of a media key, or null: PLAY plays, PAUSE pauses, PLAY_PAUSE toggles. */
+    @Nullable
+    public static String mediaKeyBroadcast(int keycode) {
         switch (keycode) {
             case KeyEvent.KEYCODE_MEDIA_PLAY:
+                return Broadcast_RESUME;
             case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                return Broadcast_PAUSE;
             case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                broadcastIntent = new Intent(Broadcast_PLAY);
-                context.sendBroadcast(broadcastIntent);
-                return true;
+                return Broadcast_PLAY;
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
             case KeyEvent.KEYCODE_3:
             case KeyEvent.KEYCODE_MEDIA_NEXT:
-                broadcastIntent = new Intent(Broadcast_PLAY_NEXT);
-                context.sendBroadcast(broadcastIntent);
-                break;
+                return Broadcast_PLAY_NEXT;
             case KeyEvent.KEYCODE_MEDIA_REWIND:
             case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
-                broadcastIntent = new Intent(Broadcast_PLAY_PREVIOUS);
-                context.sendBroadcast(broadcastIntent);
-                break;
+                return Broadcast_PLAY_PREVIOUS;
             default:
+                return null;
         }
+    }
 
-        return false;
+    /** Sends a media key to the player; @return true when the key is consumed (the play keys). */
+    public static boolean handleUserInput(@NonNull Context context, int keycode) {
+        Log.d(TAG, "Keycode " + keycode);
+        String action = mediaKeyBroadcast(keycode);
+        if (action == null) {
+            return false;
+        }
+        context.sendBroadcast(new Intent(action).setPackage(context.getPackageName()));
+        return !Broadcast_PLAY_NEXT.equals(action) && !Broadcast_PLAY_PREVIOUS.equals(action);
     }
 
     public static boolean isServiceRunning(@NonNull Context context, Class<?> serviceClass) {

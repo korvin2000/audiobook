@@ -1,6 +1,5 @@
 package com.fanok.audiobooks.activity;
 
-import android.annotation.SuppressLint;
 import android.app.UiModeManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -9,7 +8,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
@@ -20,11 +18,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.content.ContextCompat;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.MvpAppCompatActivity;
 import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.fanok.audiobooks.Hourglass;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.interface_pacatge.sleep_timer.SleepTimerView;
 import com.fanok.audiobooks.presenter.SleepTimerPresenter;
@@ -54,11 +52,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
 
     private BroadcastReceiver finihTimer;
 
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -117,6 +110,7 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         } else {
             mStart.setImageResource(R.drawable.ic_play);
         }
+        mStart.setContentDescription(getString(started ? R.string.stop : R.string.play));
     }
 
     @Override
@@ -169,7 +163,7 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         }
     }
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    /** Only the player service, in this app, sends these: never exported. */
     private void registerdBradcast() {
         updateTimerBroadcast = new BroadcastReceiver() {
             @Override
@@ -181,13 +175,8 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
                 mSeconds.setText(String.format(Locale.ROOT, "%02d", hms[2]));
             }
         };
-        IntentFilter updateTimerFilter = new IntentFilter(bradcast_UpdateTimer);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(updateTimerBroadcast, updateTimerFilter, RECEIVER_EXPORTED);
-        }else{
-            registerReceiver(updateTimerBroadcast, updateTimerFilter);
-        }
-
+        ContextCompat.registerReceiver(this, updateTimerBroadcast, new IntentFilter(bradcast_UpdateTimer),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
 
         finihTimer = new BroadcastReceiver() {
             @Override
@@ -195,12 +184,8 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
                 mPresenter.finish();
             }
         };
-        IntentFilter finishTimerFilter = new IntentFilter(bradcast_FinishTimer);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(finihTimer, finishTimerFilter, RECEIVER_EXPORTED);
-        }else{
-            registerReceiver(finihTimer, finishTimerFilter);
-        }
+        ContextCompat.registerReceiver(this, finihTimer, new IntentFilter(bradcast_FinishTimer),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
 
