@@ -123,7 +123,7 @@ public class DialogEqualizerFragment extends DialogFragment {
         Intent intent = new Intent(Broadcast_EqualizerEnabled);
         intent.putExtra("enabled", enabled);
         intent.setPackage(requireContext().getPackageName());
-        requireContext().sendBroadcast(intent);
+        requireContext().sendBroadcast(intent.setPackage(requireContext().getPackageName()));
     }
 
     @Override
