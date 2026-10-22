@@ -13,6 +13,7 @@ public class SiteHttpTest {
         assertTrue(SiteHttp.isChallenge(null, "Just a moment..."));
         assertTrue(SiteHttp.isChallenge(null, "DDoS-Guard"));
         assertTrue(SiteHttp.isChallenge(null, "Attention Required! | Cloudflare"));
+        assertTrue(SiteHttp.isChallenge(null, "Security Verification"));
     }
 
     @Test

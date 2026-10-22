@@ -42,7 +42,8 @@ public final class SiteHttp {
         if (cookies != null) {
             connection.cookies(cookies);
         }
-        if (Url.isHost(url, Url.SERVER_BAZA_KNIG)) {
+        if (Url.isHost(url, Url.SERVER_BAZA_KNIG) && (cookies == null || !cookies.containsKey("PHPSESSID"))) {
+            // The session the user pasted in settings; a newer one issued by the site (in the jar) wins.
             String session = Consts.getBazaKnigCookies();
             if (session != null && !session.isEmpty()) {
                 connection.cookie("PHPSESSID", session);
@@ -56,13 +57,16 @@ public final class SiteHttp {
         return parse(execute(connect(url)));
     }
 
-    /** Executes a connection built by {@link #connect} and remembers its cookies for the host. */
+    /**
+     * Executes a connection built by {@link #connect} and remembers its cookies for the requested host. Jsoup
+     * merges cookies across redirects, so after a cross-host redirect nothing is recorded (they cannot be attributed).
+     */
     public static Connection.Response execute(Connection connection) throws IOException {
+        String requestedHost = Url.hostOf(connection.request().url().toString());
         Connection.Response response = connection.execute();
         Map<String, String> cookies = response.cookies();
-        if (!cookies.isEmpty()) {
-            JAR.computeIfAbsent(Url.hostOf(response.url().toString()), k -> new ConcurrentHashMap<>())
-                    .putAll(cookies);
+        if (!cookies.isEmpty() && requestedHost.equals(Url.hostOf(response.url().toString()))) {
+            JAR.computeIfAbsent(requestedHost, k -> new ConcurrentHashMap<>()).putAll(cookies);
         }
         return response;
     }
@@ -70,6 +74,10 @@ public final class SiteHttp {
     /** Parses a response or throws: a challenge page → {@link CookesExeption}, HTTP ≥ 400 → {@link HttpStatusException}. */
     public static Document parse(Connection.Response response) throws IOException {
         String url = response.url().toString();
+        if (response.bodyAsBytes().length >= MAX_BODY_BYTES) {
+            // Jsoup silently truncates at maxBodySize; a cut page would parse as "no more items", so refuse it.
+            throw new IOException("Response larger than " + MAX_BODY_BYTES + " bytes: " + url);
+        }
         Document document = response.parse();
         if (isChallenge(response.header("cf-mitigated"), document.title())) {
             throw new CookesExeption(url);
@@ -87,6 +95,7 @@ public final class SiteHttp {
         }
         String t = title == null ? "" : title.toLowerCase(Locale.ROOT);
         return t.contains("just a moment") || t.contains("attention required")
-                || t.contains("ddos-guard") || t.contains("checking your browser");
+                || t.contains("ddos-guard") || t.contains("checking your browser")
+                || t.contains("security verification");
     }
 }

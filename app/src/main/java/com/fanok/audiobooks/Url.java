@@ -142,9 +142,10 @@ public class Url {
             return url;
         }
         URI uri = URI.create(url.trim());
-        String authority = uri.getRawAuthority().toLowerCase(Locale.ROOT);
-        String www = authority.startsWith("www.") ? "www." : "";
-        return url.trim().replaceFirst("(?i)" + java.util.regex.Pattern.quote(www + host), www + current)
+        String www = uri.getHost().toLowerCase(Locale.ROOT).startsWith("www.") ? "www." : "";
+        String authority = (uri.getRawUserInfo() != null ? uri.getRawUserInfo() + "@" : "") + www + current
+                + (uri.getPort() >= 0 ? ":" + uri.getPort() : "");
+        return url.trim().replaceFirst(java.util.regex.Pattern.quote(uri.getRawAuthority()), authority)
                 .replaceFirst("^(?i)http://", "https://");
     }
 

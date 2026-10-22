@@ -30,5 +30,6 @@ public class UrlTest {
         assertEquals("https://www.izib.uk/b/2", Url.canonical("https://www.IZIBUK.ru/b/2"));
         assertEquals("https://akniga.org/a", Url.canonical("https://akniga.org/a"));
         assertEquals("garbage", Url.canonical("garbage"));
+        assertEquals("https://user@baza-knig.top:8443/x", Url.canonical("https://user@baza-knig.ink:8443/x"));
     }
 }

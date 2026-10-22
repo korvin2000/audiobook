@@ -53,6 +53,8 @@ public final class BookPageFixtures {
                             return status;
                         case "header":
                             return "cf-mitigated".equalsIgnoreCase((String) args[0]) ? cfMitigated : null;
+                        case "bodyAsBytes":
+                            return html.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         case "parse":
                             return Jsoup.parse(html, url);
                         default:
