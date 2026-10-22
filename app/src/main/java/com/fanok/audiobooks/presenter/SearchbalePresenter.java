@@ -174,6 +174,7 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
 
     @Override
     public void onDestroy() {
+        mWatchDogHandler.removeCallbacksAndMessages(null);
         mBooksDBModel.closeDB();
     }
 
@@ -481,10 +482,14 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
 
     private void commitData() {
         android.util.Log.d("SRC", "ALL DONE books=" + (books == null ? 0 : books.size()));
-        books = sort(mCurUrls, books); //при добавлении источников изменять не надо
-        filterBooks();
-        getViewState().showProgres(false);
-        isLoading = false;
+        try {
+            books = sort(mCurUrls, books); //при добавлении источников изменять не надо
+            filterBooks();
+        } finally {
+            // исключение при сортировке/фильтрации не должно оставлять isLoading = true и спиннер
+            isLoading = false;
+            getViewState().showProgres(false);
+        }
         getViewState().setNotFoundVisibile(
                 isLoadAutors && mSearcheblPOJO.getAutorsList().isEmpty() &&
                         mSearcheblPOJO.getSeriesList().isEmpty() &&
@@ -589,22 +594,25 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
             @Override
             public void onError(@NotNull Throwable e) {
                 android.util.Log.d("SRC", "onError " + e.getClass().getName() + " : " + e.getMessage());
-                if (e.getClass() == CookesExeption.class) {
-                    if (String.valueOf(e.getMessage()).contains(Url.SERVER_BAZA_KNIG)) {
-                        getViewState().showToast(R.string.cookes_baza_knig_exeption);
-                    }
-                } else if (e.getClass() == NullPointerException.class) {
-                    String url = e.getMessage();
-                    if (url != null) {
-                        for (Hashtable.Entry<String, Boolean> entry : hesSearchable.entrySet()) {
-                            String key = entry.getKey();
-                            if (url.contains(key)) {
-                                entry.setValue(false);
+                try {
+                    if (e.getClass() == CookesExeption.class) {
+                        if (String.valueOf(e.getMessage()).contains(Url.SERVER_BAZA_KNIG)) {
+                            getViewState().showToast(R.string.cookes_baza_knig_exeption);
+                        }
+                    } else if (e.getClass() == NullPointerException.class) {
+                        String url = e.getMessage();
+                        if (url != null) {
+                            for (Hashtable.Entry<String, Boolean> entry : hesSearchable.entrySet()) {
+                                String key = entry.getKey();
+                                if (url.contains(key)) {
+                                    entry.setValue(false);
+                                }
                             }
                         }
                     }
+                } finally {
+                    onComplete();
                 }
-                onComplete();
             }
 
             @Override
@@ -701,13 +709,15 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
                     .subscribe(new Observer<ArrayList<GenrePOJO>>() {
                         @Override
                         public void onError(@NotNull Throwable e) {
-                            if (e.getClass() == NullPointerException.class) {
-                                isEnd = true;
-                            } else {
-                                getViewState().showToast(R.string.error_load_data);
+                            try {
+                                if (e.getClass() == NullPointerException.class) {
+                                    isEnd = true;
+                                } else {
+                                    getViewState().showToast(R.string.error_load_data);
+                                }
+                            } finally {
+                                onComplete();
                             }
-                            onComplete();
-
                         }
 
                         @Override
@@ -722,9 +732,12 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
                         @Override
                         public void onComplete() {
                             Log.d(TAG, "onComplete");
-                            getViewState().showDataGenres(genre);
-                            getViewState().showProgres(false);
-                            isLoading = false;
+                            try {
+                                getViewState().showDataGenres(genre);
+                            } finally {
+                                isLoading = false;
+                                getViewState().showProgres(false);
+                            }
                             getViewState().setNotFoundVisibile(genre.isEmpty());
                         }
                     });
@@ -739,9 +752,12 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
                     @Override
                     public void onComplete() {
                         Log.d(TAG, "onComplete");
-                        filterAutorsAndSeries();
-                        getViewState().showProgresTop(false);
-                        isLoadAutors = true;
+                        try {
+                            filterAutorsAndSeries();
+                        } finally {
+                            getViewState().showProgresTop(false);
+                            isLoadAutors = true;
+                        }
                         getViewState().setNotFoundVisibile(
                                 !isLoading && ((books != null && books.isEmpty()) || (genre != null
                                         && genre.isEmpty())) &&
