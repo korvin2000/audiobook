@@ -3,8 +3,6 @@ package com.fanok.audiobooks.fragment;
 import static android.content.Context.UI_MODE_SERVICE;
 import static android.os.Build.VERSION.SDK_INT;
 import static android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS;
-import static com.fanok.audiobooks.Consts.PROXY_PASSWORD;
-import static com.fanok.audiobooks.Consts.PROXY_USERNAME;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -70,8 +68,6 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -269,53 +265,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 requireActivity().getApplicationContext(), R.xml.preferences,
                 false);
         initSummary(getPreferenceScreen());
-
-        preferenceChangeListner("pref_proxy",
-                (preference, newValue) -> {
-                    App.useProxy = (boolean) newValue;
-                    if((boolean)newValue){
-                        Authenticator authenticator = new Authenticator() {
-                            public PasswordAuthentication getPasswordAuthentication() {
-                                return (new PasswordAuthentication(PROXY_USERNAME,
-                                        PROXY_PASSWORD.toCharArray()));
-                            }
-                        };
-                        Authenticator.setDefault(authenticator);
-                    }
-
-                    return true;
-                });
-
-        /*preferenceChangeListner("pref_proxy",
-                (preference, newValue) -> {
-                    if(!validateIP((String) newValue)){
-                        Toast.makeText(preference.getContext(), R.string
-                        .incorect_fomat_proxy_server, Toast.LENGTH_LONG).show();
-                        return false;
-                    }else return true;
-                });
-
-        preferenceChangeListner("pref_proxy_prot", new Preference.OnPreferenceChangeListener() {
-            @Override
-            public boolean onPreferenceChange(Preference preference, Object newValue) {
-                if(!validatePORT((String) newValue)){
-                    Toast.makeText(preference.getContext(), R.string.incorect_fomat_port, Toast
-                    .LENGTH_LONG).show();
-                    return false;
-                }else return true;
-            }
-        });
-
-        preferenceChangeListner("proxy_enabled", (preference, newValue) -> {
-            setProxy((Boolean) newValue);
-            return true;
-        });
-
-        SharedPreferences pref = PreferenceManager
-                .getDefaultSharedPreferences(requireContext());
-        setProxy(pref.getBoolean("proxy_enabled", false));
-
-*/
 
         preferenceChangeListner("pref_theme", (preference, newValue) -> {
             if (newValue.equals(getString(R.string.theme_dark_value)) || newValue
@@ -882,39 +831,5 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     Toast.LENGTH_SHORT).show();
         }
     }
-
-    /*private void setProxy(boolean value){
-        Preference preferenceProxy = findPreference("pref_proxy");
-        if(preferenceProxy!=null){
-            if(value){
-                preferenceProxy.setEnabled(true);
-            }else {
-                preferenceProxy.setEnabled(false);
-            }
-        }
-
-        Preference preferencePort = findPreference("pref_proxy_prot");
-        if(preferencePort!=null){
-            if(value){
-                preferencePort.setEnabled(true);
-            }else {
-                preferencePort.setEnabled(false);
-            }
-        }
-    }
-
-
-    private boolean validateIP(@NonNull String ip) {
-        if (ip.isEmpty()) return true;
-        Matcher matcher = Consts.REGEXP_IP.matcher(ip);
-        return matcher.find();
-    }
-
-    private boolean validatePORT(@NonNull String port) {
-        if (port.isEmpty()) return true;
-        Matcher matcher = Consts.REGEXP_PORT.matcher(port);
-        return matcher.find();
-    }*/
-
 
 }

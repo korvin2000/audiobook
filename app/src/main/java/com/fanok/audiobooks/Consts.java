@@ -6,7 +6,6 @@ import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_NEXT;
 import static com.fanok.audiobooks.presenter.BookPresenter.Broadcast_PLAY_PREVIOUS;
 
-import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
@@ -18,20 +17,9 @@ import android.view.KeyEvent;
 import android.view.MenuItem;
 import androidx.annotation.NonNull;
 import androidx.core.graphics.drawable.DrawableCompat;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.Socket;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.regex.Pattern;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 public class Consts {
     private static final String TAG = "Consts";
@@ -46,14 +34,6 @@ public class Consts {
 
     public static final Pattern REGEXP_EMAIL = Pattern.compile(
             "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}$", Pattern.CASE_INSENSITIVE);
-
-    public static final Pattern REGEXP_PORT = Pattern.compile("\\d{1,5}");
-
-    private static final String zeroTo255
-            = "([01]?[0-9]{1,2}|2[0-4][0-9]|25[0-5])";
-
-    public static final Pattern REGEXP_IP = Pattern.compile(zeroTo255 + "\\." + zeroTo255 + "\\."
-            + zeroTo255 + "\\." + zeroTo255);
 
     public static final String USER_AGENT
             = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36";
@@ -133,10 +113,9 @@ public class Consts {
     public static int getSOURCE() {
         return SOURCE;
     }
-    public static final String PROXY_HOST = "23.247.247.115";
-    public static final int PROXY_PORT = 15441;
-    public static final String PROXY_USERNAME = "user142424";
-    public static final String PROXY_PASSWORD = "3yuh5e";
+    // proxy removed; call sites deleted in Phase 1
+    public static final String PROXY_HOST = "";
+    public static final int PROXY_PORT = 0;
 
 
 
@@ -244,100 +223,12 @@ public class Consts {
         return false;
     }
 
-    public static class TLSSocketFactory extends SSLSocketFactory {
-        private final SSLSocketFactory delegate;
-
-        public TLSSocketFactory(SSLSocketFactory delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public String[] getDefaultCipherSuites() {
-            return delegate.getDefaultCipherSuites();
-        }
-
-        @Override
-        public String[] getSupportedCipherSuites() {
-            return delegate.getSupportedCipherSuites();
-        }
-
-        @Override
-        public Socket createSocket() throws IOException {
-            return enableTLS(delegate.createSocket());
-        }
-
-        @Override
-        public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-            return enableTLS(delegate.createSocket(s, host, port, autoClose));
-        }
-
-        @Override
-        public Socket createSocket(String host, int port) throws IOException {
-            return enableTLS(delegate.createSocket(host, port));
-        }
-
-        @Override
-        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
-            return enableTLS(delegate.createSocket(host, port, localHost, localPort));
-        }
-
-        @Override
-        public Socket createSocket(InetAddress host, int port) throws IOException {
-            return enableTLS(delegate.createSocket(host, port));
-        }
-
-        @Override
-        public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort) throws IOException {
-            return enableTLS(delegate.createSocket(address, port, localAddress, localPort));
-        }
-
-        private Socket enableTLS(Socket socket) {
-            if (socket instanceof SSLSocket) {
-                SSLSocket sslSocket = (SSLSocket) socket;
-                String[] supported = sslSocket.getSupportedProtocols();
-                ArrayList<String> enabled = new ArrayList<>();
-                for (String p : supported) {
-                    if (p != null && p.startsWith("TLS")) {
-                        enabled.add(p);
-                    }
-                }
-                if (!enabled.isEmpty()) {
-                    sslSocket.setEnabledProtocols(enabled.toArray(new String[0]));
-                }
-            }
-            return socket;
-        }
-    }
-
+    /**
+     * Platform TLS: system trust store plus the network_security_config anchors, with default
+     * hostname verification. Never replace it with a trust-all factory.
+     */
     public static SSLSocketFactory socketFactory() {
-
-        @SuppressLint("CustomX509TrustManager")
-        TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
-            public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                return new java.security.cert.X509Certificate[0];
-            }
-
-            @SuppressLint("TrustAllX509TrustManager")
-            public void checkClientTrusted(X509Certificate[] certs, String authType) {
-            }
-
-            @SuppressLint("TrustAllX509TrustManager")
-            public void checkServerTrusted(X509Certificate[] certs, String authType) {
-            }
-        }};
-
-        try {
-            SSLContext sslContext;
-            try {
-                sslContext = SSLContext.getInstance("TLS", org.conscrypt.Conscrypt.newProvider());
-            } catch (Throwable t) {
-                sslContext = SSLContext.getInstance("TLS");
-            }
-            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-            return new TLSSocketFactory(sslContext.getSocketFactory());
-        } catch (NoSuchAlgorithmException | KeyManagementException e) {
-            throw new RuntimeException("Failed to create a SSL socket factory", e);
-        }
+        return (SSLSocketFactory) SSLSocketFactory.getDefault();
     }
 
     public static String getSorceName(@NonNull Context context, @NonNull String url){

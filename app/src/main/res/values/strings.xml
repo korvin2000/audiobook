@@ -233,7 +233,6 @@
     <string name="sending_email">Отправка сообщения…</string>
     <string name="no_books">Поиск не дал результатов.</string>
     <string name="error_send_mail">Не удалось отправить сообщение!</string>
-    <string name="email_send">Сообщение отправлено</string>
     <string name="message_help_disable_battery_optimisetion">Здравствуйте! Помогите пожалуйста отключить режим экономии заряда батареи на моем устройстве.</string>
     <string name="icon" translatable="false">icon</string>
     <string name="support_project">Поддержка проекта</string>
@@ -356,10 +355,6 @@
     <string name="confirm_clear_audio_list">Вы уверены что хотите очистить список аудио файлов</string>
     <string name="history_procent">Отобразить процент прослушанного</string>
     <string name="history_procent_desc">Отображать процент прослушанного в избранном и в истории</string>
-    <string name="proxy_desc">Использовать прокси для обхода блокировок</string>
-    <string name="proxy">Прокси</string>
-    <string name="incorect_fomat_proxy_server">Неверный формат IP адреса</string>
-    <string name="incorect_fomat_port">Неверный порт</string>
     <string name="rewind">Перемотка</string>
     <string name="rewind_desc">Перемотка назад во время долгой паузы</string>
     <string name="source">Источник</string>

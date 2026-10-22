@@ -240,8 +240,6 @@ public class MainActivity extends MvpAppCompatActivity
 
         setContentView(R.layout.activity_main);
 
-        showDiagnosticReportsIfExists();
-
 
 
 
@@ -361,44 +359,6 @@ public class MainActivity extends MvpAppCompatActivity
         });
     }
 
-
-    private void showDiagnosticReportsIfExists() {
-        try {
-            StringBuilder sb = new StringBuilder();
-            for (java.io.File f : new java.io.File[]{com.fanok.audiobooks.App.getCrashFile(),
-                    com.fanok.audiobooks.App.getAnrFile()}) {
-                if (f.exists() && f.length() > 0) {
-                    java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        sb.append(line).append("\n");
-                    }
-                    br.close();
-                    f.delete();
-                }
-            }
-            if (sb.length() > 0) {
-                int maxLen = 6000;
-                String message = sb.length() > maxLen ? sb.substring(0, maxLen) + "\n...(текст обрезан)" : sb.toString();
-                final String fullReport = "Найден отчёт о сбое/зависании. Передайте в поддержку:\n\n" + message;
-                new AlertDialog.Builder(this)
-                        .setTitle("Диагностика")
-                        .setMessage(fullReport)
-                        .setPositiveButton("ОК", null)
-                        .setNeutralButton("Копировать", (dialog, which) -> {
-                            try {
-                                android.content.ClipData clip = android.content.ClipData.newPlainText("Diagnostic", fullReport);
-                                android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
-                                cm.setPrimaryClip(clip);
-                                Toast.makeText(MainActivity.this, "Отчёт скопирован в буфер обмена", Toast.LENGTH_LONG).show();
-                            } catch (Exception ignored) {
-                            }
-                        })
-                        .show();
-            }
-        } catch (Exception ignored) {
-        }
-    }
 
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
