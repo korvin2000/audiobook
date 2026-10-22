@@ -235,7 +235,7 @@ public class DownloadStorageHelper {
      * interruption, and a recorded copy that no longer exists is forgotten and written again. HLS streams stay Media3
      * assets and are not exported.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     public static void exportBooks(@NonNull Context context, @NonNull Collection<String> bookUrls,
                                    @Nullable ExportCallback callback) {
         final Context app = context.getApplicationContext();
@@ -299,7 +299,7 @@ public class DownloadStorageHelper {
     }
 
     /** Writes one chapter below the download folder (file path first, else the selected SAF tree); returns its URI. */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static String exportChapter(@NonNull Context context, @NonNull Cache cache, @NonNull Download download,
                                         @Nullable BookPOJO book, @NonNull String bookUrl, @NonNull BooksAudioEntity row,
@@ -335,7 +335,7 @@ public class DownloadStorageHelper {
      * never replaced or truncated. The extension is sniffed from the first bytes. Throws, leaving nothing behind,
      * unless exactly {@code length} bytes were copied.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     public static File exportToDir(@NonNull Cache cache, @NonNull String key, @NonNull Uri uri, long length,
                                    @NonNull File dir, int number, @Nullable String title,
@@ -372,7 +372,7 @@ public class DownloadStorageHelper {
     }
 
     /** SAF variant of {@link #exportToDir}: a temp document renamed with renameDocument; returns the renamed URI. */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static String exportToTree(@NonNull Context context, @NonNull DocumentFile dir, @NonNull Cache cache,
                                        @NonNull String key, @NonNull Uri uri, long length, int number,
@@ -1112,7 +1112,7 @@ public class DownloadStorageHelper {
      * download another chapter's URL produced), deletes exactly their recorded copies, then removes the rows, or
      * clears their local_uri, only as far as that succeeded.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     @NonNull
     private static Outcome applyPlan(@NonNull Context context, @NonNull AudioListDBModel model, @NonNull String bookUrl,
                                      @NonNull List<BooksAudioEntity> bookRows, @NonNull List<BooksAudioEntity> chosen,
@@ -1201,7 +1201,7 @@ public class DownloadStorageHelper {
      * True while a row of the book still has a local copy, or a download in the index that this deletion did not
      * remove ({@link #stillNeeded}); also when the index cannot be read.
      */
-    @androidx.media3.common.util.UnstableApi
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
     private static boolean anyStillNeeded(@NonNull Context context, @NonNull String bookUrl,
                                           @NonNull List<BooksAudioEntity> rows, @NonNull Set<String> removedIds) {
         DownloadIndex index;

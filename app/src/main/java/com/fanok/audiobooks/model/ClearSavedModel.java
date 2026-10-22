@@ -1,6 +1,7 @@
 package com.fanok.audiobooks.model;
 
 
+import androidx.annotation.OptIn;
 import android.content.Context;
 
 import androidx.annotation.NonNull;
@@ -50,7 +51,7 @@ public class ClearSavedModel {
      * A fresh immutable snapshot of every book with a download, an exported copy or a Saved row. Call off the main
      * thread; nothing shared is mutated.
      */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @NonNull
     public List<DownloadItem> loadSnapshot() throws java.io.IOException {
         Map<String, Download> byId = new HashMap<>();
@@ -112,7 +113,7 @@ public class ClearSavedModel {
      * The book's state from all of its chapters; without chapter rows, from its downloads alone. A recorded copy
      * counts only while it exists.
      */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @NonNull
     private DownloadItem aggregate(@NonNull Group g, @NonNull List<BooksAudioEntity> rows,
                                    @NonNull Map<String, Download> byId, @NonNull Map<String, Boolean> present) {

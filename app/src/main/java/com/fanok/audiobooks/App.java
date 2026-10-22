@@ -1,5 +1,7 @@
 package com.fanok.audiobooks;
 
+import android.os.StrictMode;
+import androidx.annotation.OptIn;
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -29,7 +31,7 @@ import java.net.SocketException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class App extends Application {
 
     // proxy removed; call sites deleted in Phase 1
@@ -158,10 +160,15 @@ public class App extends Application {
         return COOKIE_JAR;
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public void onCreate() {
         super.onCreate();
+        if (BuildConfig.DEBUG) {
+            // Debug only: report main-thread disk/network access and leaked closeables/cursors (DATA-07).
+            StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build());
+            StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder().detectAll().penaltyLog().build());
+        }
         instance = this;
 
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
@@ -202,10 +209,6 @@ public class App extends Application {
         RxJavaPlugins.setErrorHandler(App::handleRxError);
 
         try {
-            try {
-                java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1);
-            } catch (Throwable ignored) {}
-
             okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder().cookieJar(COOKIE_JAR);
 
             // Application interceptor (runs before OkHttp adds its own User-Agent): fills in defaults
@@ -289,7 +292,7 @@ public class App extends Application {
      * has the creation posted to the main looper and waits for it, failing with an IllegalStateException after
      * {@link #MAIN_THREAD_WAIT_SECONDS} instead of creating it on its own thread.
      */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     public DownloadManager getDownloadManager() {
         DownloadManager dm = downloadManager;
         if (dm == null) {
@@ -310,7 +313,7 @@ public class App extends Application {
 
     private static final long MAIN_THREAD_WAIT_SECONDS = 10;
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private void createDownloadStackOnMain() {
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             createDownloadStack();
@@ -342,7 +345,7 @@ public class App extends Application {
      * downloads HLS segments in parallel on it) and the manager. The volatile manager is published last, so a reader
      * that sees it also sees the cache.
      */
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private synchronized void createDownloadStack() {
         if (downloadManager != null) return;
         File dir = downloadStoreDir();

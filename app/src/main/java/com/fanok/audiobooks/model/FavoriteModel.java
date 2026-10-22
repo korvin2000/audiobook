@@ -1,5 +1,6 @@
 package com.fanok.audiobooks.model;
 
+import androidx.annotation.OptIn;
 import static com.fanok.audiobooks.util.DownloadUtil.getDownloadManager;
 
 import android.content.Context;
@@ -20,7 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class FavoriteModel implements
         com.fanok.audiobooks.interface_pacatge.favorite.FavoriteModel {
 
