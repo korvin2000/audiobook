@@ -1,28 +1,15 @@
 package com.fanok.audiobooks.pojo;
 
-import static com.fanok.audiobooks.App.useProxy;
-import static com.fanok.audiobooks.Consts.PROXY_HOST;
-import static com.fanok.audiobooks.Consts.PROXY_PORT;
-
 import androidx.annotation.NonNull;
-import androidx.media3.common.util.UnstableApi;
 
-import com.fanok.audiobooks.App;
 import com.fanok.audiobooks.Consts;
-import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.Url;
-import com.fanok.audiobooks.model.OtherArtistModel;
+import com.fanok.audiobooks.net.SiteHttp;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.reactivex.Observable;
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.Proxy.Type;
-import java.util.ArrayList;
 
-import org.jsoup.Connection;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
@@ -55,15 +42,34 @@ public class BookPOJO {
         return name;
     }
 
+    /** The hosts a book page can be loaded from; anything else is rejected before any download. */
+    private static final String[] SOURCES = {Url.SERVER, Url.SERVER_IZIBUK, Url.SERVER_ABMP3, Url.SERVER_AKNIGA,
+            Url.SERVER_BAZA_KNIG, Url.SERVER_KNIGOBLUD, Url.SERVER_AUDIOBOO, Url.SERVER_OTRUB, Url.SERVER_POLEKNIG};
+
+    /** {@link Url#canonical} of {@code url}; throws {@link IllegalArgumentException} for a host no parser handles. */
+    public static String requireSupported(String url) {
+        String canonical = Url.canonical(url);
+        for (String source : SOURCES) {
+            if (Url.isHost(canonical, source)) {
+                return canonical;
+            }
+        }
+        throw new IllegalArgumentException("unsupported host: " + url);
+    }
+
+    /** Absolute value of {@code attr} (resolved against the page URL) plus {@code suffix}; "" when absent. */
+    public static String absUrl(Element element, String attr, String suffix) {
+        String url = element.absUrl(attr);
+        return url.isEmpty() ? "" : url + suffix;
+    }
+
     public static BookPOJO getBookByUrl(String url) throws IOException {
+        return parseBookKnigavuhe(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookKnigavuhe(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
 
-        Document document = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .referrer("https://google.com/")
-                .sslSocketFactory(Consts.socketFactory())
-                .maxBodySize(0)
-                .get();
         Elements titleElement = document.getElementsByClass("book_title_elem book_title_name");
         if (!titleElement.isEmpty()) {
             bookPOJO.setName(titleElement.first().text().trim());
@@ -79,7 +85,7 @@ public class BookPOJO {
         if (!posterElements.isEmpty()) {
             Elements img = posterElements.first().getElementsByTag("img");
             if (!img.isEmpty()) {
-                String imgUrl = img.first().attr("src");
+                String imgUrl = img.first().absUrl("src");
                 if (imgUrl != null) {
                     int lastPos = imgUrl.indexOf("?");
                     if (lastPos != -1) {
@@ -104,7 +110,7 @@ public class BookPOJO {
             Elements aElements = autorElements.first().getElementsByTag("a");
             if (!aElements.isEmpty()) {
                 bookPOJO.setAutor(aElements.first().text());
-                bookPOJO.setUrlAutor(Url.SERVER + aElements.first().attr("href"));
+                bookPOJO.setUrlAutor(absUrl(aElements.first(), "href", ""));
             }
         }
 
@@ -116,7 +122,7 @@ public class BookPOJO {
                 Elements aTag = element.getElementsByTag("a");
                 if (!aTag.isEmpty()) {
                     bookPOJO.setArtist(aTag.first().text());
-                    bookPOJO.setUrlArtist(Url.SERVER + aTag.first().attr("href"));
+                    bookPOJO.setUrlArtist(absUrl(aTag.first(), "href", ""));
                 }
             }
         }
@@ -128,7 +134,7 @@ public class BookPOJO {
                 Elements seriesElement = element.getElementsByTag("a");
                 if (!seriesElement.isEmpty()) {
                     bookPOJO.setSeries(seriesElement.first().text());
-                    bookPOJO.setUrlSeries(Url.SERVER + seriesElement.first().attr("href"));
+                    bookPOJO.setUrlSeries(absUrl(seriesElement.first(), "href", ""));
                 }
             }
 
@@ -140,7 +146,7 @@ public class BookPOJO {
             if (!aTag.isEmpty()) {
                 Element a = aTag.first();
                 bookPOJO.setGenre(a.text());
-                bookPOJO.setUrlGenre(Url.SERVER + a.attr("href"));
+                bookPOJO.setUrlGenre(absUrl(a, "href", ""));
             }
         }
 
@@ -159,31 +165,20 @@ public class BookPOJO {
         return bookPOJO;
     }
 
-    @UnstableApi
     public static BookPOJO getBookByUrlABMP3(String url) throws IOException {
+        return parseBookABMP3(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookABMP3(Document document, String url) {
         String autor = "";
 
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0);
-
-        if(App.useProxy) {
-            Proxy proxy = new Proxy(Type.SOCKS,
-                    new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-            connection.proxy(proxy);
-        }
-
-        Document document = connection.get();
 
         bookPOJO.setUrl(url);
 
         Elements img = document.getElementsByClass("abook_image");
         if (img != null && !img.isEmpty()) {
-            bookPOJO.setPhoto(img.first().attr("src"));
+            bookPOJO.setPhoto(img.first().absUrl("src"));
         }
 
         Elements desc = document.getElementsByClass("abook-desc");
@@ -199,19 +194,19 @@ public class BookPOJO {
                     if (element != null && !element.isEmpty()) {
                         autor = element.first().text();
                         bookPOJO.setAutor(autor);
-                        bookPOJO.setUrlAutor(Url.SERVER_ABMP3 + element.first().attr("href") + "?page=");
+                        bookPOJO.setUrlAutor(absUrl(element.first(), "href", "?page="));
                     }
                 } else if (info.text().contains("Читает")) {
                     Elements element = info.getElementsByTag("a");
                     if (element != null && !element.isEmpty()) {
                         bookPOJO.setArtist(element.first().text());
-                        bookPOJO.setUrlArtist(Url.SERVER_ABMP3 + element.first().attr("href") + "?page=");
+                        bookPOJO.setUrlArtist(absUrl(element.first(), "href", "?page="));
                     }
                 } else if (info.text().contains("Жанры")) {
                     Elements element = info.getElementsByTag("a");
                     if (element != null && !element.isEmpty()) {
                         bookPOJO.setGenre(element.first().text());
-                        bookPOJO.setUrlGenre(Url.SERVER_ABMP3 + element.first().attr("href") + "?page=");
+                        bookPOJO.setUrlGenre(absUrl(element.first(), "href", "?page="));
                     }
                 } else {
                     Elements clock = info.getElementsByClass("fa-clock-o");
@@ -256,26 +251,14 @@ public class BookPOJO {
         return photo;
     }
 
-    @UnstableApi
     public static BookPOJO getBookByUrlAbook(String url) throws IOException {
+        return parseBookAkniga(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookAkniga(Document document, String url) {
         String autor = "";
 
         BookPOJO bookPOJO = new BookPOJO();
-
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0);
-
-        if(App.useProxy) {
-            Proxy proxy = new Proxy(Type.SOCKS,
-                    new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-            connection.proxy(proxy);
-        }
-
-        Document document = connection.get();
 
         bookPOJO.setUrl(url);
 
@@ -289,7 +272,7 @@ public class BookPOJO {
                 if (autor != null && !autor.isEmpty()) {
                     bookPOJO.setAutor(autor);
                 }
-                String href = aElements.first().attr("href");
+                String href = aElements.first().absUrl("href");
                 if (href != null && !href.isEmpty()) {
                     bookPOJO.setUrlAutor(href + "page<page>/");
                 }
@@ -304,7 +287,7 @@ public class BookPOJO {
         if (posterElements != null && !posterElements.isEmpty()) {
             Elements img = posterElements.first().getElementsByTag("img");
             if (img != null && img.size() != 0) {
-                String imgUrl = img.first().attr("src");
+                String imgUrl = img.first().absUrl("src");
                 if (imgUrl != null && !imgUrl.isEmpty()) {
                     bookPOJO.setPhoto(imgUrl);
                 }
@@ -335,14 +318,9 @@ public class BookPOJO {
             }
         }
         if (bookPOJO.getPhoto() == null || bookPOJO.getPhoto().isEmpty()) {
-            Elements metaImg = document.select("meta[property=og:image], meta[name=twitter:image]");
-            if (metaImg != null && !metaImg.isEmpty()) {
-                String imgUrl = metaImg.first().attr("content");
-                if (imgUrl != null && !imgUrl.isEmpty()) {
-                    if (imgUrl.startsWith("//")) imgUrl = "https:" + imgUrl;
-                    else if (imgUrl.startsWith("/")) imgUrl = Url.SERVER_AKNIGA + imgUrl;
-                    bookPOJO.setPhoto(imgUrl);
-                }
+            Element metaImg = document.select("meta[property=og:image], meta[name=twitter:image]").first();
+            if (metaImg != null) {
+                bookPOJO.setPhoto(metaImg.absUrl("content"));
             }
         }
 
@@ -362,7 +340,7 @@ public class BookPOJO {
 
         Elements artistElements = document.getElementsByClass("link__reader");
         if (artistElements != null && artistElements.size() != 0) {
-            String href = artistElements.first().attr("href");
+            String href = artistElements.first().absUrl("href");
             if (href != null && !href.isEmpty()) {
                 bookPOJO.setUrlArtist(href + "page<page>/");
             }
@@ -372,12 +350,11 @@ public class BookPOJO {
             }
         }
 
-        Elements seriesElements = document.select("a[href*=/xfsearch/cikl/]");
+        Elements seriesElements = document.select("a[href*=/series/]");
         if (seriesElements != null && !seriesElements.isEmpty()) {
             Element aTag = seriesElements.first();
-            String href = aTag.attr("href");
+            String href = aTag.absUrl("href");
             if (href != null && !href.isEmpty()) {
-                if (href.startsWith("/")) href = Url.SERVER_AUDIOBOO + href;
                 bookPOJO.setUrlSeries(href);
             }
             String title = aTag.text();
@@ -399,7 +376,7 @@ public class BookPOJO {
         Elements genreConteiner = document.getElementsByClass("section__title");
         if (genreConteiner != null && genreConteiner.size() != 0) {
             Element a = genreConteiner.first();
-            String href = a.attr("href");
+            String href = a.absUrl("href");
             if (href != null && !href.isEmpty()) {
                 bookPOJO.setUrlGenre(href + "page<page>/");
             }
@@ -418,25 +395,12 @@ public class BookPOJO {
         return bookPOJO;
     }
 
-    @UnstableApi
     public static BookPOJO getBookByUrlIziBuk(String url) throws IOException {
+        return parseBookIzibuk(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookIzibuk(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0);
-
-        if(App.useProxy) {
-            Proxy proxy = new Proxy(Type.SOCKS,
-                    new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-            connection.proxy(proxy);
-        }
-
-        Document document = connection.get();
-
-
 
         bookPOJO.setUrl(url);
 
@@ -450,9 +414,9 @@ public class BookPOJO {
 
         Elements imgParent = document.getElementsByClass("_5e0b77");
         if (imgParent != null && imgParent.size() != 0) {
-            Element img = imgParent.first().child(0);
+            Element img = imgParent.first().firstElementChild();
             if (img != null) {
-                String src = img.attr("src");
+                String src = img.absUrl("src");
                 if (src != null) {
                     bookPOJO.setPhoto(src);
                 }
@@ -470,9 +434,9 @@ public class BookPOJO {
                             Elements aTag = element.getElementsByTag("a");
                             if (aTag != null && aTag.size() != 0) {
                                 Element a = aTag.first();
-                                String href = a.attr("href");
-                                if (href != null) {
-                                    bookPOJO.setUrlAutor(Url.SERVER_IZIBUK + href + "?p=");
+                                String href = a.absUrl("href");
+                                if (!href.isEmpty()) {
+                                    bookPOJO.setUrlAutor(href + "?p=");
                                 }
                                 String name = a.text();
                                 if (name != null) {
@@ -483,9 +447,9 @@ public class BookPOJO {
                             Elements aTag = element.getElementsByTag("a");
                             if (aTag != null && aTag.size() != 0) {
                                 Element a = aTag.first();
-                                String href = a.attr("href");
-                                if (href != null) {
-                                    bookPOJO.setUrlArtist(Url.SERVER_IZIBUK + href + "?p=");
+                                String href = a.absUrl("href");
+                                if (!href.isEmpty()) {
+                                    bookPOJO.setUrlArtist(href + "?p=");
                                 }
                                 String name = a.text();
                                 if (name != null) {
@@ -506,9 +470,9 @@ public class BookPOJO {
             Elements aTag = seriesParent.first().getElementsByTag("a");
             if (aTag != null && aTag.size() != 0) {
                 Element a = aTag.first();
-                String href = a.attr("href");
-                if (href != null) {
-                    bookPOJO.setUrlSeries(Url.SERVER_IZIBUK + href + "?p=");
+                String href = a.absUrl("href");
+                if (!href.isEmpty()) {
+                    bookPOJO.setUrlSeries(href + "?p=");
                 }
                 String text = a.text();
                 if (text != null) {
@@ -519,11 +483,11 @@ public class BookPOJO {
 
         Elements genreParent = document.getElementsByClass("_7e215f");
         if (genreParent != null && genreParent.size() != 0) {
-            Element genreElement = genreParent.first().child(0);
+            Element genreElement = genreParent.first().firstElementChild();
             if (genreElement != null) {
-                String href = genreElement.attr("href");
-                if (href != null) {
-                    bookPOJO.setUrlGenre(Url.SERVER_IZIBUK + href + "?p=");
+                String href = genreElement.absUrl("href");
+                if (!href.isEmpty()) {
+                    bookPOJO.setUrlGenre(href + "?p=");
                 }
                 String text = genreElement.text();
                 if (text != null) {
@@ -542,60 +506,49 @@ public class BookPOJO {
         return bookPOJO;
     }
 
-    @UnstableApi
+    /** Loads the book behind {@code url}: unsupported host → {@link IllegalArgumentException}; fetch and page errors propagate. */
     public static Observable<BookPOJO> getDescription(String url) {
-        return Observable.create(observableEmitter -> {
-            if (url != null) {
-                BookPOJO articlesModels;
-                try {
-                    if (url.contains(Url.SERVER)) {
-                        articlesModels = getBookByUrl(url);
-                    } else if (url.contains(Url.SERVER_IZIBUK)) {
-                        articlesModels = getBookByUrlIziBuk(url);
-                    } else if (url.contains(Url.SERVER_ABMP3)) {
-                        articlesModels = getBookByUrlABMP3(url);
-                    } else if (url.contains(Url.SERVER_AKNIGA)) {
-                        articlesModels = getBookByUrlAbook(url);
-                    } else if (url.contains(Url.SERVER_BAZA_KNIG)) {
-                        articlesModels = getBookByUrlBazaKnig(url);
-                    } else if (url.contains(Url.SERVER_KNIGOBLUD)) {
-                        articlesModels = getBookByUrlKnigoblud(url);
-                    } else if (url.contains(Url.SERVER_AUDIOBOO)) {
-                        articlesModels = getBookByUrlAudioboo(url);
-                    } else if (url.contains(Url.SERVER_OTRUB)) {
-                        articlesModels = getBookByUrlOtrub(url);
-                    } else if (url.contains(Url.SERVER_POLEKNIG)) {
-                        articlesModels = getBookByUrlPoleknig(url);
-                    }else {
-                        articlesModels = new BookPOJO();
-                    }
-                    observableEmitter.onNext(articlesModels);
-                } catch (Exception e) {
-                    observableEmitter.onError(e);
-                } finally {
-                    observableEmitter.onComplete();
-                }
-            }
+        return Observable.fromCallable(() -> {
+            String pageUrl = requireSupported(url);
+            return parseBook(SiteHttp.get(pageUrl), pageUrl);
         });
     }
 
-    private static BookPOJO getBookByUrlKnigoblud(final String url) throws IOException {
+    /** Pure: picks the parser by host; a page without a book title is an {@link IOException}, never an empty book. */
+    static BookPOJO parseBook(Document document, String bookUrl) throws IOException {
+        String url = requireSupported(bookUrl);
+        BookPOJO book;
+        if (Url.isHost(url, Url.SERVER)) {
+            book = parseBookKnigavuhe(document, url);
+        } else if (Url.isHost(url, Url.SERVER_IZIBUK)) {
+            book = parseBookIzibuk(document, url);
+        } else if (Url.isHost(url, Url.SERVER_ABMP3)) {
+            book = parseBookABMP3(document, url);
+        } else if (Url.isHost(url, Url.SERVER_AKNIGA)) {
+            book = parseBookAkniga(document, url);
+        } else if (Url.isHost(url, Url.SERVER_BAZA_KNIG)) {
+            book = parseBookBazaKnig(document, url);
+        } else if (Url.isHost(url, Url.SERVER_KNIGOBLUD)) {
+            book = parseBookKnigoblud(document, url);
+        } else if (Url.isHost(url, Url.SERVER_AUDIOBOO)) {
+            book = parseBookAudioboo(document, url);
+        } else if (Url.isHost(url, Url.SERVER_OTRUB)) {
+            book = parseBookOtrub(document, url);
+        } else {
+            book = parseBookPoleknig(document, url);
+        }
+        if (book.isNull()) {
+            throw new IOException("no book on page: " + url);
+        }
+        return book;
+    }
 
-
+    static BookPOJO parseBookKnigoblud(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0)
-                .ignoreHttpErrors(true);
-
-        Document document = connection.get();
 
         Element img = document.getElementById("BookCoverImage");
         if (img != null) {
-            bookPOJO.setPhoto(img.attr("src"));
+            bookPOJO.setPhoto(img.absUrl("src"));
         }
 
         Elements desc = document.getElementsByClass("BookDescriptionContent");
@@ -613,7 +566,7 @@ public class BookPOJO {
             Elements series = seriesConteiner.first().getElementsByTag("a");
             if (series!=null&&series.size()!=0){
                 bookPOJO.setSeries(series.first().text());
-                bookPOJO.setUrlSeries(Url.SERVER_KNIGOBLUD + series.first().attr("href"));
+                bookPOJO.setUrlSeries(absUrl(series.first(), "href", ""));
             }
         }
 
@@ -628,19 +581,19 @@ public class BookPOJO {
                         if (element != null && element.size() != 0) {
                             String autor = element.first().text();
                             bookPOJO.setAutor(autor);
-                            bookPOJO.setUrlAutor(Url.SERVER_KNIGOBLUD + element.first().attr("href"));
+                            bookPOJO.setUrlAutor(absUrl(element.first(), "href", ""));
                         }
                     } else if (info.text().contains("\uD83C\uDF99")) {
                         Elements element = info.getElementsByTag("a");
                         if (element != null && element.size() != 0) {
                             bookPOJO.setArtist(element.first().text());
-                            bookPOJO.setUrlArtist(Url.SERVER_KNIGOBLUD + element.first().attr("href"));
+                            bookPOJO.setUrlArtist(absUrl(element.first(), "href", ""));
                         }
                     } else if (info.text().contains("\uD83D\uDCD5")) {
                         Elements element = info.getElementsByTag("a");
                         if (element != null && element.size() != 0) {
                             bookPOJO.setGenre(element.first().text());
-                            bookPOJO.setUrlGenre(Url.SERVER_KNIGOBLUD + element.first().attr("href"));
+                            bookPOJO.setUrlGenre(absUrl(element.first(), "href", ""));
                         }
                     }
                 }
@@ -653,20 +606,10 @@ public class BookPOJO {
             bookPOJO.setName(name);
         }
         bookPOJO.setUrl(url);
-
-        if (!bookPOJO.isNull()) {
-            return bookPOJO;
-        }else {
-            throw new IOException("bookPOJO is Null");
-        }
-
-
-
-
+        return bookPOJO;
     }
 
-    @UnstableApi
-    private static BookPOJO getBookByUrlBazaKnig(final String url) throws IOException {
+    static BookPOJO parseBookBazaKnig(Document document, String url) {
 
         int indexSorce = url.indexOf("?sorce");
         int sorce = 1;
@@ -676,29 +619,6 @@ public class BookPOJO {
         }
 
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0)
-                .ignoreHttpErrors(true);
-
-        if (!Consts.getBazaKnigCookies().isEmpty()) {
-            connection.cookie("PHPSESSID", Consts.getBazaKnigCookies());
-        }
-
-        if(App.useProxy) {
-            Proxy proxy = new Proxy(Type.SOCKS,
-                    new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-            connection.proxy(proxy);
-        }
-
-        Document document = connection.get();
-
-        if (document.title().contains("Just a moment")) {
-            throw new CookesExeption(url);
-        }
 
         bookPOJO.setUrl(url);
 
@@ -712,8 +632,8 @@ public class BookPOJO {
                         if (liText.contains("Автор")) {
                             Elements aTag = li.getElementsByTag("a");
                             if (aTag != null && aTag.size() > 0) {
-                                String aHref = aTag.first().attr("href");
-                                if (aHref != null) {
+                                String aHref = aTag.first().absUrl("href");
+                                if (!aHref.isEmpty()) {
                                     bookPOJO.setUrlAutor(aHref + "page/");
                                 }
                                 String autorName = aTag.first().text();
@@ -729,8 +649,8 @@ public class BookPOJO {
                             if (sorce == 1) {
                                 Elements aTag = li.getElementsByTag("a");
                                 if (aTag != null && aTag.size() > 0) {
-                                    String aHref = aTag.first().attr("href");
-                                    if (aHref != null) {
+                                    String aHref = aTag.first().absUrl("href");
+                                    if (!aHref.isEmpty()) {
                                         bookPOJO.setUrlArtist(aHref + "page/");
                                     }
                                     String artistName = aTag.first().text();
@@ -777,8 +697,8 @@ public class BookPOJO {
                                 String text = a.text();
                                 if (text != null && !text.isEmpty()) {
                                     bookPOJO.setSeries(text);
-                                    String href = a.attr("href");
-                                    if (href != null) {
+                                    String href = a.absUrl("href");
+                                    if (!href.isEmpty()) {
                                         bookPOJO.setUrlSeries(href + "page/");
                                     }
                                 }
@@ -791,8 +711,8 @@ public class BookPOJO {
                                 String text = genreConteiner.first().text();
                                 if (text != null && !text.isEmpty()) {
                                     bookPOJO.setGenre(text);
-                                    String href = genreConteiner.first().attr("href");
-                                    if (href != null) {
+                                    String href = genreConteiner.first().absUrl("href");
+                                    if (!href.isEmpty()) {
                                         bookPOJO.setUrlGenre(href + "page/");
                                     }
                                 }
@@ -808,7 +728,7 @@ public class BookPOJO {
             Element element = imgConteiner.first();
             Elements img = element.getElementsByTag("img");
             if (img != null && !img.isEmpty()) {
-                String src = img.first().attr("src");
+                String src = img.first().absUrl("src");
                 if (src != null) {
                     bookPOJO.setPhoto(src);
                 }
@@ -818,7 +738,8 @@ public class BookPOJO {
         Elements title = document.getElementsByTag("h1");
         if (title != null && !title.isEmpty()) {
             String text = title.first().ownText();
-            bookPOJO.setName(text.substring(0, text.indexOf(" - ")));
+            int dash = text.indexOf(" - ");
+            bookPOJO.setName((dash == -1 ? text : text.substring(0, dash)).trim());
         }
 
         Elements desc = document.getElementsByClass("short-text");
@@ -838,37 +759,19 @@ public class BookPOJO {
     }
 
 
-    @UnstableApi
     public static BookPOJO getBookByUrlAudioboo(String url) throws IOException {
+        return parseBookAudioboo(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookAudioboo(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0);
-
-        if(useProxy){
-            Proxy proxy = new Proxy(Type.SOCKS,
-                    new InetSocketAddress(PROXY_HOST, PROXY_PORT));
-            connection.proxy(proxy);
-        }
-
-        Document document = connection.get();
         bookPOJO.setUrl(url);
 
         Element descContainer = document.getElementsByClass("page__text").first();
         if (descContainer != null) {
             Element img = descContainer.getElementsByTag("img").first();
             if (img != null) {
-                String src = img.attr("data-src");
-                if (src != null && !src.isEmpty()) {
-                    if (src.startsWith("http")) {
-                        bookPOJO.setPhoto(src);
-                    } else {
-                        bookPOJO.setPhoto(Url.SERVER_AUDIOBOO + src);
-                    }
-                }
+                bookPOJO.setPhoto(img.absUrl("data-src"));
             }
             String descText = descContainer.text();
             bookPOJO.setDesc(descText);
@@ -890,20 +793,19 @@ public class BookPOJO {
                 if (a != null) {
                     if (text.contains("Автор")) {
                         bookPOJO.setAutor(a.text());
-                        bookPOJO.setUrlAutor(a.attr("href"));
+                        bookPOJO.setUrlAutor(a.absUrl("href"));
                     } else if (text.contains("Исполнитель")) {
                         bookPOJO.setArtist(a.text());
-                        bookPOJO.setUrlArtist(a.attr("href"));
+                        bookPOJO.setUrlArtist(a.absUrl("href"));
                     } else if ((text.contains("Цикл") || text.contains("Серия")) && a != null) {
                         bookPOJO.setSeries(a.text());
-                        String href = a.attr("href");
+                        String href = a.absUrl("href");
                         if (href != null && !href.isEmpty()) {
-                            if (href.startsWith("/")) href = Url.SERVER_OTRUB + href;
                             bookPOJO.setUrlSeries(href);
                         }
                     } else if (text.contains("Жанр")) {
                         bookPOJO.setGenre(a.text());
-                        bookPOJO.setUrlGenre(a.attr("href"));
+                        bookPOJO.setUrlGenre(a.absUrl("href"));
                     }
                 }
             }
@@ -914,9 +816,8 @@ public class BookPOJO {
             if (seriesElements != null && !seriesElements.isEmpty()) {
                 Element a = seriesElements.first();
                 bookPOJO.setSeries(a.text());
-                String href = a.attr("href");
+                String href = a.absUrl("href");
                 if (href != null && !href.isEmpty()) {
-                    if (href.startsWith("/")) href = Url.SERVER_OTRUB + href;
                     bookPOJO.setUrlSeries(href);
                 }
             }
@@ -963,18 +864,12 @@ public class BookPOJO {
         return bookPOJO;
     }
 
-    @UnstableApi
     public static BookPOJO getBookByUrlOtrub(String url) throws IOException {
+        return parseBookOtrub(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookOtrub(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0)
-                .ignoreHttpErrors(true);
-
-        Document document = connection.get();
 
         bookPOJO.setUrl(url);
 
@@ -985,7 +880,7 @@ public class BookPOJO {
 
         Elements img = document.select("._5e0b77 img");
         if (img != null && img.size() > 0) {
-            bookPOJO.setPhoto(img.first().attr("src"));
+            bookPOJO.setPhoto(img.first().absUrl("src"));
         }
 
         Elements infoBlocks = document.select("._72ce76 ._5bef20");
@@ -995,21 +890,21 @@ public class BookPOJO {
                 Element a = block.select("a").first();
                 if (text.contains("Жанр") && a != null) {
                     bookPOJO.setGenre(a.text());
-                    String href = a.attr("href");
+                    String href = a.absUrl("href");
                     if (href != null && !href.isEmpty()) {
-                        bookPOJO.setUrlGenre(Url.SERVER_OTRUB + href + "?p=");
+                        bookPOJO.setUrlGenre(href + "?p=");
                     }
                 } else if (text.contains("Автор") && a != null) {
                     bookPOJO.setAutor(a.text());
-                    String href = a.attr("href");
+                    String href = a.absUrl("href");
                     if (href != null && !href.isEmpty()) {
-                        bookPOJO.setUrlAutor(Url.SERVER_OTRUB + href);
+                        bookPOJO.setUrlAutor(href);
                     }
                 } else if (text.contains("Читает") && a != null) {
                     bookPOJO.setArtist(a.text());
-                    String href = a.attr("href");
+                    String href = a.absUrl("href");
                     if (href != null && !href.isEmpty()) {
-                        bookPOJO.setUrlArtist(Url.SERVER_OTRUB + href);
+                        bookPOJO.setUrlArtist(href);
                     }
                 } else if (text.contains("Длительность")) {
                     String time = text.replace("Длительность:", "").trim();
@@ -1142,28 +1037,26 @@ public class BookPOJO {
         return coments;
     }
 
-    public void setComents(@NonNull String coments) {
-        coments = coments.replaceAll("[^0-9]", "");
-        if (!coments.matches("^\\d+$")) {
+    public void setComents(String coments) {
+        String digits = coments == null ? "" : coments.replaceAll("[^0-9]", "");
+        try {
+            this.coments = digits.isEmpty() ? 0 : Integer.parseInt(digits);
+        } catch (NumberFormatException e) {
             this.coments = 0;
-        } else {
-            int count = Integer.parseInt(coments);
-            if (count < 0) throw new IllegalArgumentException("Value must be more 0");
-            this.coments = count;
         }
     }
 
-    public void setReting(@NonNull String reting) {
-        this.reting = reting;
+    public void setReting(String reting) {
+        this.reting = reting == null ? "" : reting;
     }
 
+    /** True when the item cannot be shown: no URL or no (non-empty) name. */
     public boolean isNull() {
-        return name == null || url == null;
+        return name == null || name.isEmpty() || url == null;
     }
 
-    public void setName(@NonNull String name) {
-        if (name.isEmpty()) throw new IllegalArgumentException("Value must be not empty");
-        this.name = name;
+    public void setName(String name) {
+        this.name = name == null ? "" : name;
     }
 
     public String getDesc() {
@@ -1190,23 +1083,19 @@ public class BookPOJO {
         descriptionPOJO.setAutorUrl(this.urlAutor != null ? this.urlAutor : "");
         descriptionPOJO.setGenre(this.genre != null ? this.genre : "");
         descriptionPOJO.setGenreUrl(this.urlGenre != null ? this.urlGenre : "");
+        descriptionPOJO.setSeries(this.series);
+        descriptionPOJO.setSeriesUrl(this.urlSeries);
         descriptionPOJO.setDescription(this.desc != null ? this.desc : "");
 
         return descriptionPOJO;
     }
 
-    @UnstableApi
     public static BookPOJO getBookByUrlPoleknig(String url) throws IOException {
+        return parseBookPoleknig(SiteHttp.get(url), url);
+    }
+
+    static BookPOJO parseBookPoleknig(Document document, String url) {
         BookPOJO bookPOJO = new BookPOJO();
-
-        Connection connection = Jsoup.connect(url)
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
-                .referrer("https://google.com/")
-                .maxBodySize(0)
-                .ignoreHttpErrors(true);
-
-        Document document = connection.get();
 
         bookPOJO.setUrl(url);
 
@@ -1215,35 +1104,35 @@ public class BookPOJO {
             bookPOJO.setName(titleElement.first().text().trim());
         }
 
-        Elements img = document.select("img[src^=\"https://poleknig.com/covers/\"]");
+        Elements img = document.select("img[src*=/covers/]");
         if (img != null && img.size() > 0) {
-            bookPOJO.setPhoto(img.first().attr("src"));
+            bookPOJO.setPhoto(img.first().absUrl("src"));
         }
 
         Elements authorEl = document.select("h2.book-author > a");
         if (authorEl != null && authorEl.size() > 0) {
             bookPOJO.setAutor(authorEl.first().text());
-            String href = authorEl.first().attr("href");
+            String href = authorEl.first().absUrl("href");
             if (href != null && !href.isEmpty()) {
-                bookPOJO.setUrlAutor(Url.SERVER_POLEKNIG + href);
+                bookPOJO.setUrlAutor(href);
             }
         }
 
         Elements genreBlocks = document.select("div.book-genres > div > a");
         if (genreBlocks != null && genreBlocks.size() > 0) {
             bookPOJO.setGenre(genreBlocks.first().text());
-            String href = genreBlocks.first().attr("href");
+            String href = genreBlocks.first().absUrl("href");
             if (href != null && !href.isEmpty()) {
-                bookPOJO.setUrlGenre(Url.SERVER_POLEKNIG + href);
+                bookPOJO.setUrlGenre(href);
             }
         }
 
         Elements readerEl = document.select("div.book-reader > div > a");
         if (readerEl != null && readerEl.size() > 0) {
             bookPOJO.setArtist(readerEl.first().text());
-            String href = readerEl.first().attr("href");
+            String href = readerEl.first().absUrl("href");
             if (href != null && !href.isEmpty()) {
-                bookPOJO.setUrlArtist(Url.SERVER_POLEKNIG + href);
+                bookPOJO.setUrlArtist(href);
             }
         }
 
@@ -1253,9 +1142,8 @@ public class BookPOJO {
         }
         if (seriesEl != null && seriesEl.size() > 0) {
             bookPOJO.setSeries(seriesEl.first().text());
-            String href = seriesEl.first().attr("href");
+            String href = seriesEl.first().absUrl("href");
             if (href != null && !href.isEmpty()) {
-                if (href.startsWith("/")) href = Url.SERVER_POLEKNIG + href;
                 bookPOJO.setUrlSeries(href);
             }
         }
@@ -1270,10 +1158,7 @@ public class BookPOJO {
             bookPOJO.setDesc(desc.first().text());
         }
 
-        if (!bookPOJO.isNull()) {
-            return bookPOJO;
-        }
-        throw new NullPointerException();
+        return bookPOJO;
     }
 
     @NonNull
