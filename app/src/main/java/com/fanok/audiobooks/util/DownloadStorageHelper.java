@@ -232,7 +232,8 @@ public class DownloadStorageHelper {
      * Exports, on the storage worker and one chapter at a time, every completed single-file download of the given books
      * whose chapter has no copy yet, into "source/book/reader/NNN - title.ext" below the download folder. A chapter's
      * local_uri is recorded only once its file is complete under its final name; asking again resumes after an
-     * interruption. HLS streams stay Media3 assets and are not exported.
+     * interruption, and a recorded copy that no longer exists is forgotten and written again. HLS streams stay Media3
+     * assets and are not exported.
      */
     @androidx.media3.common.util.UnstableApi
     public static void exportBooks(@NonNull Context context, @NonNull Collection<String> bookUrls,
@@ -255,7 +256,12 @@ public class DownloadStorageHelper {
                     int bookExported = 0;
                     for (int i = 0; i < rows.size(); i++) {
                         BooksAudioEntity row = rows.get(i);
-                        if (row.localUri != null || !DeletionPlanner.isRemote(row.urlAudio)) continue;
+                        if (!DeletionPlanner.isRemote(row.urlAudio)) continue;
+                        if (row.localUri != null) {
+                            if (exists(app, row.localUri)) continue;
+                            // Deleted outside the app: the stale record must not hide the chapter from export.
+                            model.getDatabase().booksAudioDao().updateLocalUriById(row.id, null);
+                        }
                         Download download = DownloadUtil.find(index, entries.get(i), row.urlAudio);
                         if (download == null || download.state != Download.STATE_COMPLETED
                                 || !DownloadUtil.isProgressive(download.request)) {
@@ -509,18 +515,7 @@ public class DownloadStorageHelper {
                 docId = DocumentsContract.getDocumentId(uri);
             }
 
-            if (docId != null) {
-                String[] split = docId.split(":");
-                String type = split[0];
-                String path = split.length > 1 ? split[1] : "";
-
-                if ("primary".equalsIgnoreCase(type)) {
-                    File extDir = Environment.getExternalStorageDirectory();
-                    return path.isEmpty() ? extDir.getAbsolutePath() : extDir.getAbsolutePath() + "/" + path;
-                } else {
-                    return path.isEmpty() ? "/storage/" + type : "/storage/" + type + "/" + path;
-                }
-            }
+            if (docId != null) return pathOfDocumentId(docId);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -544,6 +539,21 @@ public class DownloadStorageHelper {
         }
 
         return uri.toString();
+    }
+
+    /** File path of an external-storage document id: "primary:a/b" below the external storage, "XXXX-XXXX:a" below /storage. */
+    @NonNull
+    private static String pathOfDocumentId(@NonNull String docId) {
+        String[] split = docId.split(":");
+        String type = split[0];
+        String path = split.length > 1 ? split[1] : "";
+
+        if ("primary".equalsIgnoreCase(type)) {
+            File extDir = Environment.getExternalStorageDirectory();
+            return path.isEmpty() ? extDir.getAbsolutePath() : extDir.getAbsolutePath() + "/" + path;
+        } else {
+            return path.isEmpty() ? "/storage/" + type : "/storage/" + type + "/" + path;
+        }
     }
 
     @NonNull
@@ -669,12 +679,12 @@ public class DownloadStorageHelper {
                 String downloadPath = getDownloadPath(app);
                 File baseDir = new File(downloadPath);
                 if (baseDir.exists() && baseDir.isDirectory() && baseDir.canRead()) {
-                    scanDirRecursive(app, booksDBModel, audioListDBModel, baseDir,
+                    scanDirRecursive(app, booksDBModel, audioListDBModel, baseDir, baseDir.getAbsolutePath(),
                             exportedLocations(app, booksDBModel, audioListDBModel, false));
                 } else {
                     androidx.documentfile.provider.DocumentFile rootDoc = getRootDocumentFile(app);
                     if (rootDoc != null) {
-                        scanDocDirRecursive(app, booksDBModel, audioListDBModel, rootDoc, "",
+                        scanDocDirRecursive(app, booksDBModel, audioListDBModel, rootDoc, "", rootDoc.getUri().toString(),
                                 exportedLocations(app, booksDBModel, audioListDBModel, true));
                     }
                 }
@@ -722,7 +732,8 @@ public class DownloadStorageHelper {
                                              @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                              @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
                                              @NonNull androidx.documentfile.provider.DocumentFile dir,
-                                             @NonNull String relativePath, @NonNull Set<String> exported) {
+                                             @NonNull String relativePath, @NonNull String root,
+                                             @NonNull Set<String> exported) {
         if (dir.getName() != null && dir.getName().startsWith(".")) return;
 
         androidx.documentfile.provider.DocumentFile[] files = dir.listFiles();
@@ -755,13 +766,14 @@ public class DownloadStorageHelper {
                 }
             }
 
-            processDocBookDir(context, booksDBModel, audioListDBModel, sourceName, bookName, voiceName, dir, audioDocFiles);
+            processDocBookDir(context, booksDBModel, audioListDBModel, root, sourceName, bookName, voiceName, dir,
+                    audioDocFiles);
         }
 
         for (androidx.documentfile.provider.DocumentFile f : files) {
             if (f.isDirectory()) {
                 scanDocDirRecursive(context, booksDBModel, audioListDBModel, f,
-                        relativePath.isEmpty() ? f.getName() : relativePath + "/" + f.getName(), exported);
+                        relativePath.isEmpty() ? f.getName() : relativePath + "/" + f.getName(), root, exported);
             }
         }
     }
@@ -805,6 +817,7 @@ public class DownloadStorageHelper {
     private static void processDocBookDir(@NonNull Context context,
                                           @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                           @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
+                                          @NonNull String root,
                                           @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
                                           @NonNull androidx.documentfile.provider.DocumentFile dir,
                                           @NonNull java.util.List<androidx.documentfile.provider.DocumentFile> audioDocFiles) {
@@ -813,13 +826,13 @@ public class DownloadStorageHelper {
             tracks.add(new String[]{audioDoc.getName() != null ? audioDoc.getName() : "track",
                     audioDoc.getUri() != null ? audioDoc.getUri().toString() : ""});
         }
-        importPlaylist(booksDBModel, audioListDBModel, sourceName, bookName, voiceName, findDocCoverImage(dir), tracks);
+        importPlaylist(booksDBModel, audioListDBModel, root, sourceName, bookName, voiceName, findDocCoverImage(dir), tracks);
     }
 
     private static void scanDirRecursive(@NonNull Context context,
                                          @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                          @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
-                                         @NonNull File dir, @NonNull Set<String> exported) {
+                                         @NonNull File dir, @NonNull String root, @NonNull Set<String> exported) {
         if (dir.getName().startsWith(".")) return;
 
         File[] audioFiles = dir.listFiles(new java.io.FilenameFilter() {
@@ -849,7 +862,7 @@ public class DownloadStorageHelper {
                 }
             }
 
-            processBookDir(context, booksDBModel, audioListDBModel, sourceName, bookName, voiceName, dir, audioFiles);
+            processBookDir(context, booksDBModel, audioListDBModel, root, sourceName, bookName, voiceName, dir, audioFiles);
         }
 
         File[] subDirs = dir.listFiles(new java.io.FileFilter() {
@@ -860,7 +873,7 @@ public class DownloadStorageHelper {
         });
         if (subDirs != null) {
             for (File subDir : subDirs) {
-                scanDirRecursive(context, booksDBModel, audioListDBModel, subDir, exported);
+                scanDirRecursive(context, booksDBModel, audioListDBModel, subDir, root, exported);
             }
         }
     }
@@ -868,30 +881,49 @@ public class DownloadStorageHelper {
     private static void processBookDir(@NonNull Context context,
                                        @NonNull com.fanok.audiobooks.model.BooksDBModel booksDBModel,
                                        @NonNull com.fanok.audiobooks.model.AudioListDBModel audioListDBModel,
+                                       @NonNull String root,
                                        @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
                                        @NonNull File dir, @NonNull File[] audioFiles) {
         List<String[]> tracks = new ArrayList<>();
         for (File audioFile : audioFiles) {
             tracks.add(new String[]{audioFile.getName(), audioFile.getAbsolutePath()});
         }
-        importPlaylist(booksDBModel, audioListDBModel, sourceName, bookName, voiceName, findCoverImage(dir), tracks);
+        importPlaylist(booksDBModel, audioListDBModel, root, sourceName, bookName, voiceName, findCoverImage(dir), tracks);
+    }
+
+    /**
+     * Synthetic URL of a book imported from the scanned folder {@code root} (tree URI or path), as
+     * ".../imported/rootHash/title/reader": two roots, or two readers of one title, stay separate books.
+     */
+    @NonNull
+    static String importedBookUrl(@NonNull String root, @NonNull String sourceName, @NonNull String bookName,
+                                  @NonNull String voiceName) {
+        String r = root;
+        while (r.length() > 1 && r.endsWith("/")) r = r.substring(0, r.length() - 1);
+        return "https://" + sourceName.toLowerCase() + ".org/imported/"
+                + String.format(java.util.Locale.ROOT, "%08x", r.hashCode()) + "/"
+                + sanitizeFileName(bookName) + "/" + sanitizeFileName(voiceName);
     }
 
     /**
      * Writes one scanned folder as an imported book in one transaction, tracks ({name, uri}) in natural order.
-     * The identity is source, title and reader folder, so two readers of one title stay two books.
+     * The identity is root, source, title and reader folder ({@link #importedBookUrl}).
      */
     private static void importPlaylist(@NonNull BooksDBModel booksDBModel, @NonNull AudioListDBModel audioListDBModel,
+                                       @NonNull String root,
                                        @NonNull String sourceName, @NonNull String bookName, @NonNull String voiceName,
                                        @NonNull String photoUrl, @NonNull List<String[]> tracks) {
-        String legacyUrl = "https://" + sourceName.toLowerCase() + ".org/imported/" + sanitizeFileName(bookName);
-        String fakeUrl = legacyUrl + "/" + sanitizeFileName(voiceName);
+        String titleUrl = "https://" + sourceName.toLowerCase() + ".org/imported/" + sanitizeFileName(bookName);
+        String readerUrl = titleUrl + "/" + sanitizeFileName(voiceName);
+        String fakeUrl = importedBookUrl(root, sourceName, bookName, voiceName);
         Collections.sort(tracks, (t1, t2) -> StorageNames.naturalCompare(t1[0], t2[0]));
 
         audioListDBModel.getDatabase().runInTransaction(() -> {
-            // Imports made before the reader was part of the identity shared one URL per title.
-            booksDBModel.removeSavedByUrl(legacyUrl);
-            audioListDBModel.remove(legacyUrl);
+            // Imports made before the reader, and then the root, were part of the identity.
+            for (String legacyUrl : new String[]{titleUrl, readerUrl}) {
+                booksDBModel.removeSavedByUrl(legacyUrl);
+                audioListDBModel.remove(legacyUrl);
+            }
 
             BookPOJO book = booksDBModel.getSaved(fakeUrl);
             if (book == null) {
@@ -970,8 +1002,9 @@ public class DownloadStorageHelper {
     /**
      * Deletes the downloaded copies of the chosen chapters of one book on the storage worker. A chapter is chosen
      * when its url_audio or its recorded local_uri is in {@code chapterUrls}. Online chapters stay in the list;
-     * chapters of imported books leave the library while their files stay. When no chapter stays downloaded the
-     * book leaves the Saved list.
+     * chapters of imported books leave the library while their files stay. When nothing failed and no chapter keeps a
+     * copy or a download in any state (queued, downloading, stopped, failed or completed) the book leaves the Saved
+     * list. A chapter whose download another kept chapter shares counts as kept, not deleted.
      */
     public static void deleteChapters(@NonNull Context context, @NonNull String bookUrl,
                                       @NonNull Collection<String> chapterUrls, @Nullable DeleteCallback callback) {
@@ -991,8 +1024,9 @@ public class DownloadStorageHelper {
                 }
                 total = chosen.size();
                 Set<String> removedIds = new HashSet<>();
-                deleted = applyPlan(app, model, bookUrl, bookRows, chosen, true, removedIds);
-                if (total > 0 && !anyDownloaded(app, bookUrl, model.getRows(bookUrl), removedIds)) {
+                Outcome outcome = applyPlan(app, model, bookUrl, bookRows, chosen, true, removedIds);
+                deleted = outcome.deleted;
+                if (total > 0 && outcome.failed == 0 && !anyStillNeeded(app, bookUrl, model.getRows(bookUrl), removedIds)) {
                     model.remove(bookUrl);
                     new BooksDBModel(app).removeSavedByUrl(bookUrl);
                 }
@@ -1009,78 +1043,111 @@ public class DownloadStorageHelper {
         });
     }
 
+    /** Receives, on the main thread, how many books left the library and how many chapters could not be deleted. */
+    public interface RemoveCallback {
+        void onRemoved(int removedBooks, int totalBooks, int failedChapters);
+    }
+
+    public static void removeBooks(@NonNull Context context, @NonNull Collection<String> bookUrls) {
+        removeBooks(context, bookUrls, null);
+    }
+
     /**
      * Removes books from the library on the storage worker: their Media3 downloads, the copies recorded in
-     * local_uri and their rows. Files the app did not write (imported folders) are never touched.
+     * local_uri and their rows. Files the app did not write (imported folders) are never touched. A book of which a
+     * chapter could not be deleted stays saved, with the rows (and recorded copies) of those chapters, so the removal
+     * can be retried; {@code callback} reports the counts.
      */
-    public static void removeBooks(@NonNull Context context, @NonNull Collection<String> bookUrls) {
+    public static void removeBooks(@NonNull Context context, @NonNull Collection<String> bookUrls,
+                                   @Nullable RemoveCallback callback) {
         final Context app = context.getApplicationContext();
         final List<String> urls = new ArrayList<>(bookUrls);
         STORAGE.execute(() -> {
             AudioListDBModel model = new AudioListDBModel(app);
             BooksDBModel books = new BooksDBModel(app);
+            int removed = 0;
+            int failedChapters = 0;
             for (String url : urls) {
                 try {
                     List<BooksAudioEntity> rows = model.getRows(url);
-                    applyPlan(app, model, url, rows, rows, false, new HashSet<>());
-                    books.removeSavedByUrl(url);
+                    Outcome outcome = applyPlan(app, model, url, rows, rows, false, new HashSet<>());
+                    failedChapters += outcome.failed;
+                    if (outcome.failed == 0) {
+                        books.removeSavedByUrl(url);
+                        removed++;
+                    }
                     Intent cancel = new Intent(app, DownloadActionReceiver.class);
                     cancel.setAction("CANCEL");
                     cancel.setPackage(app.getPackageName());
                     cancel.putExtra("id", url);
                     app.sendBroadcast(cancel);
                 } catch (Exception e) {
+                    failedChapters++;
                     android.util.Log.e("DownloadStorageHelper", "Error removing book " + url, e);
                 }
             }
             app.sendBroadcast(new Intent(BookActivity.Broadcast_UPDATE_ADAPTER).setPackage(app.getPackageName()));
+            if (callback != null) {
+                final int removedBooks = removed;
+                final int failed = failedChapters;
+                new android.os.Handler(android.os.Looper.getMainLooper())
+                        .post(() -> callback.onRemoved(removedBooks, urls.size(), failed));
+            }
         });
     }
 
-    /** Plan rows of one book carrying every download id each chapter may be stored under (current and legacy). */
-    @androidx.media3.common.util.UnstableApi
-    @NonNull
-    private static java.util.Map<Integer, DeletionPlanner.Row> planRows(@NonNull String bookUrl,
-                                                                        @NonNull List<BooksAudioEntity> bookRows) {
-        java.util.Map<Integer, DeletionPlanner.Row> byId = new java.util.HashMap<>();
-        List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(bookUrl, bookRows);
-        for (int i = 0; i < bookRows.size(); i++) {
-            BooksAudioEntity row = bookRows.get(i);
-            byId.put(row.id, new DeletionPlanner.Row(row.urlBook, row.urlAudio, row.localUri,
-                    DownloadUtil.idsOf(entries.get(i))));
-        }
-        return byId;
+    /** What a deletion did to its chosen rows. */
+    static final class Outcome {
+        /** Copies and downloads gone. */
+        int deleted;
+        /** Nothing failed, but a download the chapter owns stays for a kept chapter that shares it. */
+        int kept;
+        /** A download or a copy could not be removed: the row and its local_uri stay. */
+        int failed;
     }
 
     /**
      * Applies the deletion plan of {@code chosen} (rows of {@code bookRows}): removes their Media3 downloads, except a
-     * download still needed by a row that is not chosen (a shared HLS stream), deletes exactly their recorded copies,
-     * then clears or removes only the rows whose copies are gone. Returns how many rows were fully handled.
+     * download that a row which is not chosen owns ({@link DownloadIds#ownedIds}: a shared HLS stream, never a legacy
+     * download another chapter's URL produced), deletes exactly their recorded copies, then removes the rows, or
+     * clears their local_uri, only as far as that succeeded.
      */
     @androidx.media3.common.util.UnstableApi
-    private static int applyPlan(@NonNull Context context, @NonNull AudioListDBModel model, @NonNull String bookUrl,
-                                 @NonNull List<BooksAudioEntity> bookRows, @NonNull List<BooksAudioEntity> chosen,
-                                 boolean keepOnlineRows, @NonNull Set<String> removedIds) {
-        java.util.Map<Integer, DeletionPlanner.Row> all = planRows(bookUrl, bookRows);
-        List<DeletionPlanner.Row> planRows = new ArrayList<>();
-        Set<Integer> chosenIds = new HashSet<>();
-        for (BooksAudioEntity row : chosen) {
-            planRows.add(all.get(row.id));
-            chosenIds.add(row.id);
-        }
-        List<DeletionPlanner.Row> surviving = new ArrayList<>();
-        for (BooksAudioEntity row : bookRows) {
-            if (!chosenIds.contains(row.id)) surviving.add(all.get(row.id));
-        }
-        List<String> roots = downloadRoots(context);
-        DeletionPlanner.Plan plan = DeletionPlanner.plan(planRows, roots, keepOnlineRows, DownloadStorageHelper::downloadIdOf,
-                DeletionPlanner.idsOf(surviving, DownloadStorageHelper::downloadIdOf));
-
+    @NonNull
+    private static Outcome applyPlan(@NonNull Context context, @NonNull AudioListDBModel model, @NonNull String bookUrl,
+                                     @NonNull List<BooksAudioEntity> bookRows, @NonNull List<BooksAudioEntity> chosen,
+                                     boolean keepOnlineRows, @NonNull Set<String> removedIds) {
+        List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(bookUrl, bookRows);
         DownloadIndex index = null;
+        java.util.Map<String, String> stored = null;
         try {
             index = DownloadUtil.getDownloadManager().getDownloadIndex();
-        } catch (Exception ignored) {
+            stored = DownloadUtil.storedRequests(index, entries);
+        } catch (Exception e) {
+            android.util.Log.w("DownloadStorageHelper", "Download index unreadable", e);
         }
+        Set<Integer> chosenIds = new HashSet<>();
+        for (BooksAudioEntity row : chosen) chosenIds.add(row.id);
+        List<DeletionPlanner.Row> planRows = new ArrayList<>();
+        List<List<String>> owned = new ArrayList<>();
+        Set<String> keptIds = new HashSet<>();
+        for (int i = 0; i < bookRows.size(); i++) {
+            BooksAudioEntity row = bookRows.get(i);
+            List<String> ids = DownloadUtil.idsOf(entries.get(i));
+            // Without a readable index every id a row may use counts as its own, so shared downloads stay.
+            List<String> own = !DeletionPlanner.isRemote(row.urlAudio) ? Collections.<String>emptyList()
+                    : stored != null ? DownloadIds.ownedIds(entries.get(i), row.urlAudio, stored) : ids;
+            if (chosenIds.contains(row.id)) {
+                planRows.add(new DeletionPlanner.Row(row.urlBook, row.urlAudio, row.localUri, ids));
+                owned.add(own);
+            } else {
+                keptIds.addAll(own);
+            }
+        }
+        List<String> roots = downloadRoots(context);
+        DeletionPlanner.Plan plan = DeletionPlanner.plan(planRows, roots, keepOnlineRows,
+                DownloadStorageHelper::downloadIdOf, keptIds);
+
         Set<String> failed = new HashSet<>();
         for (String id : plan.downloadIdsToRemove) {
             try {
@@ -1095,56 +1162,75 @@ public class DownloadStorageHelper {
         }
         failed.addAll(deleteRecordedUris(context, plan.urisToDelete, roots));
 
+        Set<DeletionPlanner.Row> toRemove = new HashSet<>(plan.rowsToRemove);
+        Set<DeletionPlanner.Row> toClear = new HashSet<>(plan.rowsToClearLocalUri);
+        Outcome outcome = new Outcome();
         try {
             model.getDatabase().runInTransaction(() -> {
-                for (DeletionPlanner.Row row : plan.rowsToRemove) {
-                    if (isHandled(row, failed)) model.removeTrack(row.urlBook, row.urlAudio);
-                }
-                for (DeletionPlanner.Row row : plan.rowsToClearLocalUri) {
-                    if (isHandled(row, failed)) {
+                for (int k = 0; k < planRows.size(); k++) {
+                    DeletionPlanner.Row row = planRows.get(k);
+                    boolean copyPlanned = plan.urisToDelete.contains(row.localUri);
+                    boolean copyFailed = copyPlanned && failed.contains(row.localUri);
+                    boolean idFailed = false;
+                    for (String id : DeletionPlanner.idsOf(row, DownloadStorageHelper::downloadIdOf)) {
+                        idFailed |= failed.contains(id);
+                    }
+                    if (toRemove.contains(row) && !copyFailed && !idFailed) {
+                        model.removeTrack(row.urlBook, row.urlAudio);
+                    } else if (copyPlanned && !copyFailed && (toRemove.contains(row) || toClear.contains(row))) {
+                        // The copy is gone even when the row stays for a download that could not be removed.
                         model.getDatabase().booksAudioDao().updateLocalUri(row.urlBook, row.urlAudio, null);
                     }
+                    boolean shared = false;
+                    for (String id : owned.get(k)) shared |= keptIds.contains(id);
+                    if (copyFailed || idFailed) outcome.failed++;
+                    else if (shared) outcome.kept++;
+                    else outcome.deleted++;
                 }
             });
         } catch (Exception e) {
             android.util.Log.e("DownloadStorageHelper", "Error updating deleted chapters", e);
-            return 0;
+            Outcome none = new Outcome();
+            none.failed = planRows.size();
+            return none;
         }
-        int handled = 0;
-        for (DeletionPlanner.Row row : planRows) {
-            if (isHandled(row, failed)) handled++;
-        }
-        return handled;
+        return outcome;
     }
 
-    private static boolean isHandled(@NonNull DeletionPlanner.Row row, @NonNull Set<String> failed) {
-        if (failed.contains(row.localUri)) return false;
-        for (String id : DeletionPlanner.idsOf(row, DownloadStorageHelper::downloadIdOf)) {
-            if (failed.contains(id)) return false;
-        }
-        return true;
-    }
-
-    /** True while a row still has a local copy or a completed Media3 download that is not being removed. */
+    /**
+     * True while a row of the book still has a local copy, or a download in the index that this deletion did not
+     * remove ({@link #stillNeeded}); also when the index cannot be read.
+     */
     @androidx.media3.common.util.UnstableApi
-    private static boolean anyDownloaded(@NonNull Context context, @NonNull String bookUrl,
-                                         @NonNull List<BooksAudioEntity> rows, @NonNull Set<String> removedIds) {
-        DownloadIndex index = null;
+    private static boolean anyStillNeeded(@NonNull Context context, @NonNull String bookUrl,
+                                          @NonNull List<BooksAudioEntity> rows, @NonNull Set<String> removedIds) {
+        DownloadIndex index;
         try {
             index = DownloadUtil.getDownloadManager().getDownloadIndex();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            return true;
         }
+        java.util.Map<String, Integer> downloads = new java.util.HashMap<>();
         List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(bookUrl, rows);
         for (int i = 0; i < rows.size(); i++) {
             BooksAudioEntity row = rows.get(i);
             if (localCopyOf(context, row) != null) return true;
-            if (index != null && DeletionPlanner.isRemote(row.urlAudio)) {
+            if (DeletionPlanner.isRemote(row.urlAudio)) {
                 Download download = DownloadUtil.find(index, entries.get(i), row.urlAudio);
-                if (download != null && download.state == Download.STATE_COMPLETED
-                        && !removedIds.contains(download.request.id)) {
-                    return true;
-                }
+                if (download != null) downloads.put(download.request.id, download.state);
             }
+        }
+        return stillNeeded(downloads, removedIds);
+    }
+
+    /**
+     * Whether a book's rows are still needed, given the downloads its chapters have in the index (id to state): any
+     * one in a state but removing (queued, downloading, stopped, failed or completed) that this deletion did not
+     * remove keeps them, so a pending download never loses its chapter row.
+     */
+    static boolean stillNeeded(@NonNull java.util.Map<String, Integer> downloads, @NonNull Set<String> removedIds) {
+        for (java.util.Map.Entry<String, Integer> d : downloads.entrySet()) {
+            if (d.getValue() != Download.STATE_REMOVING && !removedIds.contains(d.getKey())) return true;
         }
         return false;
     }
@@ -1163,7 +1249,8 @@ public class DownloadStorageHelper {
 
     /**
      * Deletes exactly the given recorded copies (content:// through SAF, file:// and plain paths through File), then
-     * prunes the folders above each one that are now empty, stopping below its root. Returns the URIs still present.
+     * prunes the folders above each one that are now empty: at most the source/book/reader folders, never a
+     * configured root nor a folder above one ({@link DeletionPlanner#prunableDepth}). Returns the URIs still present.
      */
     @NonNull
     public static Set<String> deleteRecordedUris(@NonNull Context context, @NonNull Collection<String> uris,
@@ -1187,22 +1274,41 @@ public class DownloadStorageHelper {
             List<String> folders = safFoldersAbove(context, docUri);
             DocumentFile doc = DocumentFile.fromSingleUri(context, docUri);
             boolean gone = doc == null || doc.delete() || !doc.exists();
-            if (gone) pruneEmptySafFolders(context, docUri, folders);
+            if (gone) pruneEmptySafFolders(context, docUri, folders, rootPaths(context, roots));
             return gone;
         }
         File file = new File(uri.startsWith("file://") ? Uri.parse(uri).getPath() : uri);
         boolean gone = file.delete() || !file.exists();
-        if (gone) pruneEmptyFolders(file.getParentFile(), DeletionPlanner.enclosingRoot(file.getAbsolutePath(), roots));
+        if (gone) pruneEmptyFolders(file, rootPaths(context, roots));
         return gone;
     }
 
-    /** Deletes {@code dir} and then its parents while each is empty and strictly below {@code root}. */
-    private static void pruneEmptyFolders(@Nullable File dir, @Nullable String root) {
+    /** The roots as file paths: tree URIs through {@link #getPathFromUri}, paths as they are. */
+    @NonNull
+    private static List<String> rootPaths(@NonNull Context context, @NonNull Collection<String> roots) {
+        List<String> paths = new ArrayList<>();
+        for (String root : roots) {
+            paths.add(root.startsWith("content://") ? getPathFromUri(context, Uri.parse(root)) : root);
+        }
+        return paths;
+    }
+
+    /** Deletes, while each is empty, the prunable folders above the deleted {@code file} strictly below its root. */
+    private static void pruneEmptyFolders(@NonNull File file, @NonNull Collection<String> roots) {
+        String root = DeletionPlanner.enclosingRoot(file.getAbsolutePath(), roots);
         if (root == null) return;
-        while (dir != null && dir.getAbsolutePath().startsWith(root + "/")) {
+        List<File> chain = new ArrayList<>();
+        for (File dir = file.getParentFile(); dir != null && dir.getAbsolutePath().startsWith(root + "/");
+             dir = dir.getParentFile()) {
+            chain.add(0, dir);
+        }
+        List<String> paths = new ArrayList<>();
+        for (File dir : chain) paths.add(dir.getAbsolutePath());
+        int depth = DeletionPlanner.prunableDepth(paths, roots);
+        for (int k = chain.size() - 1; k >= chain.size() - depth; k--) {
+            File dir = chain.get(k);
             String[] children = dir.list();
             if (children == null || children.length > 0 || !dir.delete()) return;
-            dir = dir.getParentFile();
         }
     }
 
@@ -1222,10 +1328,18 @@ public class DownloadStorageHelper {
         }
     }
 
-    /** SAF deletes folders recursively, so a folder is deleted only after a query shows it has no children. */
-    private static void pruneEmptySafFolders(@NonNull Context context, @NonNull Uri docUri, @NonNull List<String> folders) {
+    /**
+     * Deletes, nearest first and while each is empty, the {@link DeletionPlanner#prunableDepth} of {@code folders},
+     * compared with {@code rootPaths} by their file paths. SAF deletes folders recursively, so a folder is deleted
+     * only after a query shows it has no children.
+     */
+    private static void pruneEmptySafFolders(@NonNull Context context, @NonNull Uri docUri, @NonNull List<String> folders,
+                                             @NonNull List<String> rootPaths) {
+        List<String> paths = new ArrayList<>();
+        for (String id : folders) paths.add(pathOfDocumentId(id));
+        int depth = DeletionPlanner.prunableDepth(paths, rootPaths);
         android.content.ContentResolver resolver = context.getContentResolver();
-        for (int k = folders.size() - 1; k >= 0; k--) {
+        for (int k = folders.size() - 1; k >= folders.size() - depth; k--) {
             Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(docUri, folders.get(k));
             int count;
             try (android.database.Cursor cursor = resolver.query(children,

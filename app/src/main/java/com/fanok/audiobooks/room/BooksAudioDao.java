@@ -35,6 +35,9 @@ public interface BooksAudioDao {
     @Query("UPDATE books_audio SET local_uri = :localUri WHERE url_book = :bookUrl AND url_audio = :audioUrl")
     int updateLocalUri(String bookUrl, String audioUrl, String localUri);
 
+    @Query("UPDATE books_audio SET local_uri = :localUri WHERE id = :id")
+    int updateLocalUriById(int id, String localUri);
+
     @Query("SELECT * FROM books_audio")
     List<BooksAudioEntity> getAll();
 }

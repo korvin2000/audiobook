@@ -28,11 +28,13 @@ import java.util.Map;
 /** Builds the Downloads screen: one row per book, from the Saved list, the chapter rows and the Media3 index. */
 public class ClearSavedModel {
 
+    private final Context mContext;
     private final BooksDBModel mBooksDBModel;
     private final AudioListDBModel mAudioListDBModel;
 
 
     public ClearSavedModel(Context mContext) {
+        this.mContext = mContext.getApplicationContext();
         mBooksDBModel = new BooksDBModel(mContext);
         mAudioListDBModel = new AudioListDBModel(mContext);
     }
@@ -76,9 +78,10 @@ public class ClearSavedModel {
             }
         }
         List<DownloadItem> items = new ArrayList<>();
+        Map<String, Boolean> present = new HashMap<>();
         for (Group group : groups.values()) {
             if (group.book == null) group.book = mBooksDBModel.getSomewhere(group.bookUrl);
-            items.add(aggregate(group, mAudioListDBModel.getRows(group.bookUrl), byId));
+            items.add(aggregate(group, mAudioListDBModel.getRows(group.bookUrl), byId, present));
         }
         return Collections.unmodifiableList(items);
     }
@@ -95,11 +98,24 @@ public class ClearSavedModel {
         return group;
     }
 
-    /** The book's state from all of its chapters; without chapter rows, from its downloads alone. */
+    /** Whether a recorded copy still exists; checked once per URI per snapshot ({@code present}). */
+    private boolean copyExists(@NonNull String uri, @NonNull Map<String, Boolean> present) {
+        Boolean exists = present.get(uri);
+        if (exists == null) {
+            exists = DownloadStorageHelper.exists(mContext, uri);
+            present.put(uri, exists);
+        }
+        return exists;
+    }
+
+    /**
+     * The book's state from all of its chapters; without chapter rows, from its downloads alone. A recorded copy
+     * counts only while it exists.
+     */
     @UnstableApi
     @NonNull
-    private static DownloadItem aggregate(@NonNull Group g, @NonNull List<BooksAudioEntity> rows,
-                                          @NonNull Map<String, Download> byId) {
+    private DownloadItem aggregate(@NonNull Group g, @NonNull List<BooksAudioEntity> rows,
+                                   @NonNull Map<String, Download> byId, @NonNull Map<String, Boolean> present) {
         int completed = 0;
         int selected = 0;
         int total;
@@ -115,10 +131,11 @@ public class ClearSavedModel {
             List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(g.bookUrl, rows);
             for (int i = 0; i < rows.size(); i++) {
                 BooksAudioEntity row = rows.get(i);
-                if (row.localUri != null) exported.add(row.ordinal >= 0 ? row.ordinal + 1 : i + 1);
+                boolean copy = row.localUri != null && copyExists(row.localUri, present);
+                if (copy) exported.add(row.ordinal >= 0 ? row.ordinal + 1 : i + 1);
                 boolean remote = DeletionPlanner.isRemote(row.urlAudio);
                 Download d = remote ? DownloadUtil.find(byId, entries.get(i), row.urlAudio) : null;
-                if (row.localUri != null || !remote || (d != null && d.state == Download.STATE_COMPLETED)) {
+                if (copy || !remote || (d != null && d.state == Download.STATE_COMPLETED)) {
                     completed++;
                     selected++;
                 } else if (d != null) {

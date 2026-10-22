@@ -112,7 +112,10 @@ public class DownloadUtil {
         return headers;
     }
 
-    /** Cookies every request for {@code bookUrl} carries unless the host set its own (baza-knig session). */
+    /**
+     * Cookies the requests for {@code bookUrl} carry to the baza-knig host over https only, unless it set its own
+     * (baza-knig session); see {@link com.fanok.audiobooks.net.MemoryCookieJar#with}.
+     */
     @NonNull
     static Map<String, String> requestCookies(@Nullable String bookUrl) {
         String session = Consts.getBazaKnigCookies();
@@ -129,7 +132,7 @@ public class DownloadUtil {
         okhttp3.OkHttpClient client = App.getOkHttpClient();
         Map<String, String> cookies = requestCookies(bookUrl);
         if (!cookies.isEmpty()) {
-            client = client.newBuilder().cookieJar(App.getCookieJar().with(cookies)).build();
+            client = client.newBuilder().cookieJar(App.getCookieJar().with(Url.SERVER_BAZA_KNIG, cookies)).build();
         }
         OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(client)
                 .setDefaultRequestProperties(requestHeaders(bookUrl));
@@ -163,7 +166,10 @@ public class DownloadUtil {
             if (book == null && Url.isHost(dataSpec.uri.toString(), Url.SERVER_BAZA_KNIG)) book = Url.SERVER_BAZA_KNIG;
             Map<String, String> headers = requestHeaders(book);
             String session = requestCookies(book).get("PHPSESSID");
-            if (session != null) headers.put("Cookie", "PHPSESSID=" + session);
+            if (session != null && "https".equalsIgnoreCase(dataSpec.uri.getScheme())
+                    && Url.isHost(dataSpec.uri.toString(), Url.SERVER_BAZA_KNIG)) {
+                headers.put("Cookie", "PHPSESSID=" + session);
+            }
             headers.putAll(dataSpec.httpRequestHeaders);
             return dataSpec.withUri(withoutLegacyRef(dataSpec.uri)).withRequestHeaders(headers);
         });
@@ -280,15 +286,17 @@ public class DownloadUtil {
     }
 
     /**
-     * The download holding the chapter {@code url} of {@code entry}: its current id, else a legacy download that is
-     * this chapter's (same URL, or a legacy id no other chapter shares). Downloads being removed are ignored.
+     * The download holding the chapter {@code url} of {@code entry}: its current id (a stream only when requested for
+     * the same host and path), else a legacy download that is this chapter's (same URL, or a legacy id no other
+     * chapter shares). Downloads being removed are ignored.
      */
     @Nullable
     public static Download find(@NonNull DownloadIndex index, @NonNull DownloadIds.Entry entry, @Nullable String url) {
         try {
-            Download download = index.getDownload(entry.id);
-            if (download != null && download.state != Download.STATE_REMOVING) return download;
-            return entry.legacyId.isEmpty() ? null : legacyOf(index.getDownload(entry.legacyId), entry, url);
+            Download download = entry.id.equals(entry.legacyId) ? null : index.getDownload(entry.id);
+            if (holds(download, entry, url, false)) return download;
+            download = entry.legacyId.isEmpty() ? null : index.getDownload(entry.legacyId);
+            return holds(download, entry, url, true) ? download : null;
         } catch (IOException e) {
             Log.w(TAG, "Download index unreadable", e);
             return null;
@@ -298,16 +306,37 @@ public class DownloadUtil {
     /** {@link #find(DownloadIndex, DownloadIds.Entry, String)} over a snapshot of downloads by id. */
     @Nullable
     public static Download find(@NonNull Map<String, Download> byId, @NonNull DownloadIds.Entry entry, @Nullable String url) {
-        Download download = byId.get(entry.id);
-        if (download != null && download.state != Download.STATE_REMOVING) return download;
-        return legacyOf(byId.get(entry.legacyId), entry, url);
+        Download download = entry.id.equals(entry.legacyId) ? null : byId.get(entry.id);
+        if (holds(download, entry, url, false)) return download;
+        download = byId.get(entry.legacyId);
+        return holds(download, entry, url, true) ? download : null;
     }
 
-    @Nullable
-    private static Download legacyOf(@Nullable Download download, @NonNull DownloadIds.Entry entry, @Nullable String url) {
-        if (download == null || download.state == Download.STATE_REMOVING) return null;
-        boolean ownUrl = url != null && withoutLegacyRef(download.request.uri).toString().equals(url);
-        return ownUrl || !entry.legacyShared ? download : null;
+    private static boolean holds(@Nullable Download download, @NonNull DownloadIds.Entry entry, @Nullable String url,
+                                 boolean legacy) {
+        if (download == null || download.state == Download.STATE_REMOVING) return false;
+        String requested = withoutLegacyRef(download.request.uri).toString();
+        return legacy ? DownloadIds.holdsLegacy(entry, url, requested) : DownloadIds.holdsCurrent(entry, url, requested);
+    }
+
+    /**
+     * Request URL by id of every download the index holds, not being removed, under one of the ids of
+     * {@code entries}: the input of {@link DownloadIds#ownedIds}.
+     */
+    @NonNull
+    public static Map<String, String> storedRequests(@NonNull DownloadIndex index,
+                                                     @NonNull List<DownloadIds.Entry> entries) throws IOException {
+        Map<String, String> stored = new HashMap<>();
+        for (DownloadIds.Entry entry : entries) {
+            for (String id : idsOf(entry)) {
+                if (id.isEmpty() || stored.containsKey(id)) continue;
+                Download d = index.getDownload(id);
+                if (d != null && d.state != Download.STATE_REMOVING) {
+                    stored.put(id, withoutLegacyRef(d.request.uri).toString());
+                }
+            }
+        }
+        return stored;
     }
 
     /**
