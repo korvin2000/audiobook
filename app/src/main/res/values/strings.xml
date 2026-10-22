@@ -307,6 +307,7 @@
     <string name="open_4pda">Открыть тему на 4pda</string>
     <string name="dowland_delete">Скачать/Удалить</string>
     <string name="delete_complite">Удаление завершено</string>
+    <string name="delete_result">Удалено %1$d из %2$d</string>
     <string name="seekTo">Перемотка</string>
     <string name="seekToPauseDesc">Снимать плеер с паузы во время перемотки</string>
     <string name="scrollToSelected">Переход к активному файлу</string>

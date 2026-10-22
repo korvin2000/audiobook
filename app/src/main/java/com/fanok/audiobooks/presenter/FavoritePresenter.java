@@ -118,9 +118,6 @@ public class FavoritePresenter extends MvpPresenter<FavoriteView> implements
                         @Override
                         public void onNext(ArrayList<BookPOJO> bookPOJOS) {
                             books = bookPOJOS;
-                            if (table == Consts.TABLE_SAVED && mContext != null) {
-                                com.fanok.audiobooks.util.DownloadStorageHelper.repairSavedBooksDatabase(mContext);
-                            }
                         }
 
                         @Override
@@ -333,18 +330,7 @@ public class FavoritePresenter extends MvpPresenter<FavoriteView> implements
             mAudioDBModel.remove(book.getUrl());
         } else if (table == Consts.TABLE_SAVED){
             if (mContext != null && book != null && book.getUrl() != null) {
-                String id = book.getUrl();
-                String logResult = com.fanok.audiobooks.util.DownloadStorageHelper.deleteBookFiles(mContext, id, book);
-                android.util.Log.d("FavoritePresenter", "Delete result: " + logResult);
-                
-                com.fanok.audiobooks.model.AudioListDBModel audioListDBModel = new com.fanok.audiobooks.model.AudioListDBModel(mContext);
-                audioListDBModel.remove(id);
-                audioListDBModel.closeDB();
-                
-                android.content.Intent intent = new android.content.Intent(mContext, com.fanok.audiobooks.broadcasts.DownloadActionReceiver.class);
-                intent.setAction("CANCEL");
-                intent.putExtra("id", id);
-                mContext.sendBroadcast(intent);
+                com.fanok.audiobooks.util.DownloadStorageHelper.removeBooks(mContext, java.util.Collections.singletonList(book.getUrl()));
             }
             mBooksDBModel.removeSaved(book);
         }        if (filterSearch.isEmpty()) {
