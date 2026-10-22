@@ -136,7 +136,8 @@ public class MainPresenter extends MvpPresenter<MainView> implements
         } else if (id == R.id.nav_artist || id == R.id.layout_nav_artist) {
 
             if (Consts.getSOURCE() == Consts.SOURCE_BAZA_KNIG||Consts.getSOURCE() == Consts.SOURCE_KNIGOBLUD
-                    ||Consts.getSOURCE() == Consts.SOURCE_OTRUB) {
+                    ||Consts.getSOURCE() == Consts.SOURCE_OTRUB
+                    || Consts.getSOURCE() == Consts.SOURCE_POLEKNIG) {
                 getViewState().showToast(R.string.section_not_available);
             } else {
                 Fragment fragment = null;

@@ -171,6 +171,8 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
                 break;
         }
 
+        binding.retrySources.setOnClickListener(v -> mPresenter.retryFailed());
+
         binding.list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
@@ -434,6 +436,17 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     }
 
     @Override
+    public void showSourcesFailed(int count) {
+        if (count > 0) {
+            binding.sourcesFailed.setText(getResources().getQuantityString(
+                    R.plurals.search_sources_failed, count, count));
+            binding.sourcesFailedLine.setVisibility(View.VISIBLE);
+        } else {
+            binding.sourcesFailedLine.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
     public void returnResult(String url, String name, int modelId, String tag) {
         Intent intent = new Intent();
         intent.putExtra("url", url);
@@ -484,15 +497,11 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     @Override
     public void startBookActivity(@NotNull @NonNull BookPOJO bookPOJO) {
 
-        if (bookPOJO.getUrl().contains(Url.SERVER_ABMP3)) {
-            SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
-            if (preferences.getBoolean("speed_up_search_abmp3", false)) {
-                Intent intent = new Intent(this, LoadBook.class);
-                intent.putExtra("url", bookPOJO.getUrl());
-                startActivity(intent);
-            } else {
-                BookActivity.startNewActivity(this, bookPOJO);
-            }
+        if (Url.isHost(bookPOJO.getUrl(), Url.SERVER_ABMP3)) {
+            // ABMP3 search cards carry only title and URL: load the full description first
+            Intent intent = new Intent(this, LoadBook.class);
+            intent.putExtra("url", bookPOJO.getUrl());
+            startActivity(intent);
         } else {
             BookActivity.startNewActivity(this, bookPOJO);
         }

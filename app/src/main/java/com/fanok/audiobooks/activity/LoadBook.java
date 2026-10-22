@@ -14,6 +14,7 @@ import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.search.Provider;
 import io.reactivex.Observer;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
@@ -47,30 +48,48 @@ public class LoadBook extends AppCompatActivity {
 
         mContext = this;
         Intent intent = getIntent();
-        mUrl = intent.getStringExtra("url");
+        mUrl = bookUrl(intent.getStringExtra("url"), intent.getData() == null ? null : intent.getData().toString());
         if (mUrl == null) {
+            // a deep link to a host the app does not scrape, or no URL at all
+            Toast.makeText(this, R.string.unknown_source, Toast.LENGTH_LONG).show();
             finish();
+            return;
         }
         mNotificationClick = intent.getBooleanExtra("notificationClick", false);
-        String text = BookActivity.getShowingView();
-        if (mUrl == null || mUrl.equals(text)) finish();
+        if (mUrl.equals(BookActivity.getShowingView())) finish();
+    }
+
+    /** The provider book URL from the explicit extra or the VIEW data, on its current host; null when unknown. */
+    static String bookUrl(String extra, String data) {
+        String url = extra != null ? extra : data;
+        if (url == null || Provider.ofUrl(url) == null) {
+            return null;
+        }
+        return Url.canonical(url);
     }
 
     @Override
     protected void onStart() {
         super.onStart();
+        if (mUrl == null) {
+            return;
+        }
         BookPOJO.getDescription(mUrl)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(new Observer<BookPOJO>() {
                     @Override
                     public void onError(@NotNull Throwable e) {
-                        if (e.getClass() == CookesExeption.class) {
-                            if (String.valueOf(e.getMessage()).contains(Url.SERVER_BAZA_KNIG)) {
-                                Toast.makeText(mContext, getResources().getText(R.string.cookes_baza_knig_exeption),
-                                        Toast.LENGTH_LONG).show();
-                            }
+                        int message;
+                        if (e instanceof CookesExeption) {
+                            message = R.string.cookes_baza_knig_exeption; // any source can raise a challenge
+                        } else if (e instanceof IllegalArgumentException
+                                && String.valueOf(e.getMessage()).startsWith("unsupported host")) {
+                            message = R.string.worong_data_sorce;
+                        } else {
+                            message = R.string.error_load_data;
                         }
+                        Toast.makeText(mContext, message, Toast.LENGTH_LONG).show();
                         finish();
                     }
 

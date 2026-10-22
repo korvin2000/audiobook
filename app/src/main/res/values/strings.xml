@@ -234,6 +234,14 @@
     <string name="incorect_email">Неверный адрес электронной почты</string>
     <string name="sending_email">Отправка сообщения…</string>
     <string name="no_books">Поиск не дал результатов.</string>
+    <plurals name="search_sources_failed">
+        <item quantity="one">%d источник недоступен</item>
+        <item quantity="few">%d источника недоступны</item>
+        <item quantity="many">%d источников недоступны</item>
+        <item quantity="other">%d источников недоступны</item>
+    </plurals>
+    <string name="retry">Повторить</string>
+    <string name="unknown_source">Неизвестный источник</string>
     <string name="error_send_mail">Не удалось отправить сообщение!</string>
     <string name="message_help_disable_battery_optimisetion">Здравствуйте! Помогите пожалуйста отключить режим экономии заряда батареи на моем устройстве.</string>
     <string name="icon" translatable="false">icon</string>

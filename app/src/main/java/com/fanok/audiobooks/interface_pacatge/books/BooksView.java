@@ -6,6 +6,7 @@ import androidx.fragment.app.Fragment;
 
 import com.arellomobile.mvp.MvpView;
 import com.arellomobile.mvp.viewstate.strategy.AddToEndSingleStrategy;
+import com.arellomobile.mvp.viewstate.strategy.OneExecutionStateStrategy;
 import com.arellomobile.mvp.viewstate.strategy.SkipStrategy;
 import com.arellomobile.mvp.viewstate.strategy.StateStrategyType;
 import com.fanok.audiobooks.pojo.BookPOJO;
@@ -32,16 +33,16 @@ public interface BooksView extends MvpView {
     @StateStrategyType(AddToEndSingleStrategy.class)
     void showProgres(boolean b);
 
-    @StateStrategyType(AddToEndSingleStrategy.class)
+    @StateStrategyType(OneExecutionStateStrategy.class)
     void showToast(int message);
 
-    @StateStrategyType(AddToEndSingleStrategy.class)
+    @StateStrategyType(OneExecutionStateStrategy.class)
     void showToast(String message);
 
     @StateStrategyType(AddToEndSingleStrategy.class)
     void showRefreshing(boolean b);
 
-    @StateStrategyType(AddToEndSingleStrategy.class)
+    @StateStrategyType(OneExecutionStateStrategy.class)
     void setPosition(int position);
 
     @StateStrategyType(SkipStrategy.class)
