@@ -24,8 +24,9 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jetbrains.annotations.NotNull;
@@ -86,31 +87,50 @@ public class AudioModel implements AudioModelInterfece {
         });
     }
 
+    /** A provider's parser: {@code base} is the page's final URL, which relative media URLs resolve against. */
+    private interface PageParser {
+        ArrayList<AudioPOJO> parse(Document doc, String base) throws IOException;
+    }
+
     /** Selects the parser by host (moved hosts are rewritten first); never returns an empty list. */
     static ArrayList<AudioPOJO> load(String rawUrl, PageSource pages) throws IOException {
         String url = Url.canonical(rawUrl);
-        if (Url.isHost(url, Url.SERVER)) {
-            return parseKnigavuhe(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_IZIBUK)) {
-            return parseIzibuk(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_ABMP3)) {
-            Document doc = pages.get(url);
-            return loadPlayerjs(doc, url, parseAbmp3BookName(doc));
-        } else if (Url.isHost(url, Url.SERVER_AKNIGA)) {
-            return loadAkniga(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_BAZA_KNIG)) {
-            return loadBazaKnig(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_KNIGOBLUD)) {
-            return parseKnigoblud(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_AUDIOBOO)) {
-            return parseAudioboo(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_OTRUB)) {
-            return parseOtrub(pages.get(url), url);
-        } else if (Url.isHost(url, Url.SERVER_POLEKNIG)) {
-            Document doc = pages.get(url);
-            return loadPlayerjs(doc, url, text(doc.selectFirst("h1")));
+        PageParser parser = parser(url);
+        if (parser == null) {
+            throw new IllegalArgumentException("unsupported host: " + Url.hostOf(rawUrl));
         }
-        throw new IllegalArgumentException("unsupported host: " + Url.hostOf(rawUrl));
+        Document doc = pages.get(url);
+        return parser.parse(doc, location(doc, url));
+    }
+
+    private static PageParser parser(String url) {
+        if (Url.isHost(url, Url.SERVER)) {
+            return AudioModel::parseKnigavuhe;
+        } else if (Url.isHost(url, Url.SERVER_IZIBUK)) {
+            return AudioModel::parseIzibuk;
+        } else if (Url.isHost(url, Url.SERVER_ABMP3)) {
+            return (doc, base) -> loadPlayerjs(doc, base, parseAbmp3BookName(doc));
+        } else if (Url.isHost(url, Url.SERVER_AKNIGA)) {
+            return AudioModel::loadAkniga;
+        } else if (Url.isHost(url, Url.SERVER_BAZA_KNIG)) {
+            // the voice is the requested one even when a redirect drops the query
+            return (doc, base) -> loadBazaKnig(doc, base, url);
+        } else if (Url.isHost(url, Url.SERVER_KNIGOBLUD)) {
+            return AudioModel::parseKnigoblud;
+        } else if (Url.isHost(url, Url.SERVER_AUDIOBOO)) {
+            return AudioModel::parseAudioboo;
+        } else if (Url.isHost(url, Url.SERVER_OTRUB)) {
+            return AudioModel::parseOtrub;
+        } else if (Url.isHost(url, Url.SERVER_POLEKNIG)) {
+            return (doc, base) -> loadPlayerjs(doc, base, text(doc.selectFirst("h1")));
+        }
+        return null;
+    }
+
+    /** Where {@code doc} was served from after redirects ({@code fallback} when unknown). */
+    private static String location(Document doc, String fallback) {
+        String location = doc.location();
+        return location == null || location.isEmpty() ? fallback : location;
     }
 
     private static Document fetchPage(String url) throws IOException {
@@ -147,7 +167,8 @@ public class AudioModel implements AudioModelInterfece {
         String query = sign.isEmpty() || sign.startsWith("?") || sign.startsWith("&") ? sign : "?" + sign;
         chapters.each(arrayOf(player, "tracks"), item -> {
             JsonArray track = item.getAsJsonArray(); // [id, title, seconds, ?, file]
-            return chapters.chapter(string(track.get(1)), base + "/" + string(track.get(4)) + query,
+            String file = string(track.get(4));
+            return chapters.chapter(string(track.get(1)), file.isEmpty() ? "" : base + "/" + file + query,
                     seconds(track.get(2)));
         });
         return chapters.done("izibuk player");
@@ -285,25 +306,36 @@ public class AudioModel implements AudioModelInterfece {
 
     /**
      * Decodes the obfuscated Playerjs forms ({@code #2…}/{@code //_//}-separated base64 and
-     * {@code /engine/go.php?url=<base64>}); a decoded value that is not an absolute URL is dropped
-     * (the junk segments of the {@code //_//} form are site-specific and cannot be told apart).
+     * {@code /engine/go.php?url=<base64>}). The {@code //_//} form is tried with each
+     * {@code //_//junk//_//} pair cut out, then with only the markers removed; a value that decodes
+     * to no absolute URL either way is dropped (the junk is site-specific and cannot be told apart).
      */
     static String playerjsUrl(String file) {
         String f = file.trim();
-        String decoded;
+        List<String> candidates = new ArrayList<>();
         int go = f.indexOf("/engine/go.php?url=");
         if (f.startsWith("#") || f.contains("//_//")) {
-            decoded = base64Text(f.replaceFirst("^#\\w", "").replace("//_//", ""));
+            String body = f.replaceFirst("^#\\w", "");
+            candidates.add(body.replaceAll("//_//.*?//_//", "").replace("//_//", ""));
+            candidates.add(body.replace("//_//", ""));
         } else if (go >= 0) {
+            // the raw query value: a '+' in it is a base64 letter, not an encoded space
+            String value = f.substring(go + 19).replaceFirst("[&#].*$", "").replace("+", "%2B");
             try {
-                decoded = base64Text(URLDecoder.decode(f.substring(go + 19), "UTF-8"));
+                candidates.add(URLDecoder.decode(value, "UTF-8"));
             } catch (UnsupportedEncodingException e) {
                 throw new IllegalStateException(e);
             }
         } else {
             return f;
         }
-        return decoded.matches("(?is)^(https?:)?//.+") ? decoded : "";
+        for (String candidate : candidates) {
+            String decoded = base64Text(candidate);
+            if (decoded.matches("(?is)^(https?:)?//.+")) {
+                return decoded;
+            }
+        }
+        return "";
     }
 
     // ---- ABMP3 ----
@@ -360,8 +392,9 @@ public class AudioModel implements AudioModelInterfece {
         return "";
     }
 
+    /** The current book's id, from its own page or player container (related books carry theirs too). */
     static String aknigaBid(Document doc) {
-        Element el = doc.selectFirst("[data-bid~=^\\d+$]");
+        Element el = doc.selectFirst("article.book--page[data-bid~=^\\d+$], .player--chapters[data-bid~=^\\d+$]");
         return el == null ? "" : el.attr("data-bid");
     }
 
@@ -386,23 +419,7 @@ public class AudioModel implements AudioModelInterfece {
                     }
                 }
                 if (items != null && items.isJsonArray()) {
-                    int[] accumulated = {0};
-                    chapters.each(items.getAsJsonArray(), item -> {
-                        JsonObject o = item.getAsJsonObject();
-                        AudioPOJO audio = chapters.chapter(string(o, "title"), hls, 0);
-                        if (audio == null) {
-                            return null;
-                        }
-                        audio.setTimeStart(o.has("time_from_start") ? seconds(o.get("time_from_start")) : accumulated[0]);
-                        if (o.has("duration")) {
-                            int duration = seconds(o.get("duration"));
-                            audio.setTime(duration);
-                            audio.setTimeFinish(o.has("time_finish") ? seconds(o.get("time_finish"))
-                                    : audio.getTimeStart() + duration);
-                            accumulated[0] = audio.getTimeFinish();
-                        }
-                        return audio;
-                    });
+                    addAknigaClips(chapters, items.getAsJsonArray(), hls);
                 }
                 if (chapters.isEmpty()) {
                     AudioPOJO whole = chapters.chapter("Аудиокнига (полная)", hls, 0);
@@ -438,6 +455,50 @@ public class AudioModel implements AudioModelInterfece {
             }
         }
         return chapters.done("akniga book");
+    }
+
+    /**
+     * Chapters clipped out of the one shared HLS stream, as complete monotonic intervals: a start
+     * that goes backwards is clamped to the previous end; an item without its own end (no
+     * {@code time_finish}/{@code duration}) ends where the next item explicitly starts, else it is
+     * skipped. Only the last chapter may stay open-ended (plays to the end of the stream).
+     */
+    private static void addAknigaClips(Chapters chapters, JsonArray items, String hls) {
+        List<AudioPOJO> clips = new ArrayList<>();
+        List<JsonObject> times = new ArrayList<>();
+        chapters.each(items, item -> {
+            JsonObject o = item.getAsJsonObject();
+            AudioPOJO audio = chapters.chapter(string(o, "title"), hls, 0);
+            if (audio != null) {
+                clips.add(audio);
+                times.add(o);
+            }
+            return null;
+        });
+        int end = 0;
+        for (int i = 0; i < clips.size(); i++) {
+            JsonObject o = times.get(i);
+            int start = Math.max(end, seconds(o.get("time_from_start")));
+            int finish = seconds(o.get("time_finish"));
+            if (finish <= start && o.has("duration")) {
+                finish = start + seconds(o.get("duration"));
+            }
+            if (finish <= start && i + 1 < times.size()) {
+                finish = seconds(times.get(i + 1).get("time_from_start"));
+            }
+            AudioPOJO clip = clips.get(i);
+            clip.setTimeStart(start);
+            if (finish > start) {
+                clip.setTime(finish - start);
+                clip.setTimeFinish(finish);
+                end = finish;
+                chapters.add(clip);
+            } else if (i == clips.size() - 1) {
+                chapters.add(clip);
+            } else {
+                chapters.skipped++;
+            }
+        }
     }
 
     /**
@@ -505,9 +566,9 @@ public class AudioModel implements AudioModelInterfece {
 
     // ---- baza-knig: per-voice strDecode or plain player scripts, else the #fr frame (archive.org) ----
 
-    private static ArrayList<AudioPOJO> loadBazaKnig(Document doc, String url) throws IOException {
+    private static ArrayList<AudioPOJO> loadBazaKnig(Document doc, String base, String url) throws IOException {
         Element scope = bazaKnigScope(doc, url);
-        Chapters chapters = bazaKnigScripts(doc, scope, url);
+        Chapters chapters = bazaKnigScripts(doc, scope, base);
         if (!chapters.isEmpty()) {
             return chapters.done("baza-knig player");
         }
@@ -515,7 +576,7 @@ public class AudioModel implements AudioModelInterfece {
         if (fr == null && bazaKnigVoice(url) == 1) {
             fr = doc.getElementById("fr");
         }
-        String frame = bazaKnigFrameUrl(fr, url);
+        String frame = bazaKnigFrameUrl(fr, base);
         if (frame == null) {
             return chapters.done("baza-knig player");
         }
@@ -532,9 +593,16 @@ public class AudioModel implements AudioModelInterfece {
         return bazaKnigScripts(doc, bazaKnigScope(doc, bookUrl), bookUrl).done("baza-knig player");
     }
 
-    /** Voice N lives in {@code #content-tabN}; pages without tabs have one voice. */
+    /**
+     * Voice N lives in {@code #content-tabN}; pages without tabs have one voice. A voice requested
+     * by {@code ?sorce=N} whose tab is missing is an error: the whole page would be another voice.
+     */
     private static Element bazaKnigScope(Document doc, String bookUrl) {
-        Element tab = doc.getElementById("content-tab" + bazaKnigVoice(bookUrl));
+        String id = "content-tab" + bazaKnigVoice(bookUrl);
+        Element tab = doc.getElementById(id);
+        if (tab == null && BAZA_KNIG_VOICE.matcher(bookUrl).find()) {
+            throw new IllegalStateException("baza-knig voice tab not found: #" + id);
+        }
         return tab != null ? tab : doc;
     }
 
@@ -588,7 +656,10 @@ public class AudioModel implements AudioModelInterfece {
         return src.isEmpty() ? null : src;
     }
 
-    /** archive.org {@code /metadata/<id>}: MP3 files once each (originals over derivatives), by name. */
+    /**
+     * archive.org {@code /metadata/<id>}: one MP3 per recording, by name — its original MP3, else
+     * one derivative (VBR over fixed bitrate). A file without a name is skipped.
+     */
     static ArrayList<AudioPOJO> parseArchiveOrgMetadata(String json, String bookName) {
         JsonObject root = object(json);
         JsonElement meta = root.get("metadata");
@@ -596,22 +667,27 @@ public class AudioModel implements AudioModelInterfece {
         if (id.isEmpty()) {
             throw new IllegalStateException("archive.org item has no identifier (dark or removed)");
         }
-        List<JsonObject> mp3 = new ArrayList<>();
-        boolean originals = false;
-        for (JsonElement file : arrayOf(root, "files")) {
-            if (file.isJsonObject() && string(file.getAsJsonObject(), "format").contains("MP3")) {
-                mp3.add(file.getAsJsonObject());
-                originals |= "original".equals(string(file.getAsJsonObject(), "source"));
-            }
-        }
-        Collections.sort(mp3, (a, b) -> string(a, "name").compareTo(string(b, "name")));
-        JsonArray files = new JsonArray();
-        for (JsonObject file : mp3) {
-            if (!originals || "original".equals(string(file, "source"))) {
-                files.add(file);
-            }
-        }
         Chapters chapters = new Chapters(bookName, "https://archive.org/");
+        Map<String, JsonObject> recordings = new TreeMap<>();
+        for (JsonElement file : arrayOf(root, "files")) {
+            JsonObject o = file.isJsonObject() ? file.getAsJsonObject() : null;
+            if (o == null || !string(o, "format").contains("MP3")) {
+                continue;
+            }
+            if (string(o, "name").isEmpty()) {
+                chapters.skipped++;
+                continue;
+            }
+            String recording = archiveOrgRecording(o);
+            JsonObject best = recordings.get(recording);
+            if (best == null || archiveOrgRank(o) < archiveOrgRank(best)) {
+                recordings.put(recording, o);
+            }
+        }
+        JsonArray files = new JsonArray();
+        for (JsonObject file : recordings.values()) {
+            files.add(file);
+        }
         chapters.each(files, item -> {
             JsonObject o = item.getAsJsonObject();
             String name = string(o, "name");
@@ -626,12 +702,24 @@ public class AudioModel implements AudioModelInterfece {
         return chapters.done("archive.org item " + id);
     }
 
+    /** The recording a file belongs to: a derivative's {@code original}, without extension or bitrate suffix. */
+    private static String archiveOrgRecording(JsonObject file) {
+        String original = string(file, "original");
+        String name = original.isEmpty() || "original".equals(string(file, "source")) ? string(file, "name") : original;
+        return name.replaceFirst("\\.[^./]*$", "").replaceFirst("(?i)_(\\d+kb|vbr)$", "");
+    }
+
+    private static int archiveOrgRank(JsonObject file) {
+        return "original".equals(string(file, "source")) ? 0 : "VBR MP3".equals(string(file, "format")) ? 1 : 2;
+    }
+
+    /** The frame's own playlist; its relative URLs resolve against the frame's (final) URL. */
     static ArrayList<AudioPOJO> parseBazaKnigPlay8(Document playlist, String bookName) {
         Element player = playlist.selectFirst(".js-play8-playlist");
         if (player == null) {
             throw new IllegalStateException("js-play8 playlist not found");
         }
-        Chapters chapters = new Chapters(bookName, "https://archive.org/");
+        Chapters chapters = new Chapters(bookName, location(playlist, ""));
         int[] index = {0};
         chapters.each(array(player.attr("value")), item -> {
             index[0]++;
