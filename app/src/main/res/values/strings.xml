@@ -140,6 +140,7 @@
     <string name="clear">Очистить</string>
     <string name="backup_created">Резервная копия создана.</string>
     <string name="backup_not_created">Не удалось создать резервную копию!</string>
+    <string name="import_partial">Импорт выполнен частично: достигнут лимит страниц.</string>
     <string name="backup_created_skipped">Резервная копия создана. Пропущено повреждённых записей: %1$d.</string>
     <string name="worning_not_allowed_write_storege">Приложению не было разрешено записывать данные хранилище.</string>
     <string name="restored">Данные успешно восстановлены.</string>

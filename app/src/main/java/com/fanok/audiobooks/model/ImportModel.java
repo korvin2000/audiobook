@@ -90,7 +90,7 @@ public class ImportModel {
                     if (!loginAbook(username, password)) {
                         message = R.string.incorect_login_or_password;
                     } else {
-                        message = importBooksAbook(emitter) ? R.string.import_complite : R.string.error_import;
+                        message = importBooksAbook(emitter);
                     }
                 } else {
                     message = R.string.worong_data_sorce;
@@ -119,6 +119,9 @@ public class ImportModel {
                 books.add(loader.load(url));
             }
         }
+        if (emitter.isDisposed()) {
+            return;
+        }
         booksDBModel.addFavorites(books);
     }
 
@@ -144,9 +147,11 @@ public class ImportModel {
         return userUrl;
     }
 
-    private boolean importBooksAbook(SingleEmitter<?> emitter) throws IOException {
+    /** Returns the message to show: complete, or partial when the page cap was reached with pages left. */
+    private int importBooksAbook(SingleEmitter<?> emitter) throws IOException {
         Set<String> urls = new LinkedHashSet<>();
-        for (int page = 1; page <= MAX_PAGES && !emitter.isDisposed(); page++) {
+        int page = 1;
+        for (; page <= MAX_PAGES && !emitter.isDisposed(); page++) {
             Document document = Jsoup.connect(getUserUrl() + "/books/page" + page + "/")
                     .cookies(getCookiesAuth())
                     .userAgent(Consts.USER_AGENT)
@@ -183,8 +188,9 @@ public class ImportModel {
                 break;
             }
         }
+        boolean partial = page > MAX_PAGES;
         addFavorites(urls, BookPOJO::getBookByUrlAbook, emitter);
-        return true;
+        return partial ? R.string.import_partial : R.string.import_complite;
     }
 
     private boolean login(@NotNull String username, @NotNull String password) throws IOException {

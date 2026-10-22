@@ -157,7 +157,11 @@ public class BooksDBModel extends BooksDBAbstract implements BooksDBHelperInterf
         ArrayList<BookPOJO> list = new ArrayList<>();
         for (BookBaseEntity entity : entities) {
             try {
-                list.add(entity.toPojo());
+                BookPOJO pojo = entity.toPojo();
+                if (pojo.getUrl() == null || pojo.getUrl().trim().isEmpty()) {
+                    throw new IllegalStateException("empty url");
+                }
+                list.add(pojo);
             } catch (RuntimeException e) {
                 mSkippedRows++;
                 Log.w(TAG, "Skipping unreadable book row " + entity.urlBook, e);

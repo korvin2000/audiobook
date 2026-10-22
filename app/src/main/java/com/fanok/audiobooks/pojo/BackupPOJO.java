@@ -81,14 +81,14 @@ public class BackupPOJO {
         if (backup.mAudio != null) {
             for (int i = 0; i < backup.mAudio.size(); i++) {
                 TimeStartPOJO audio = backup.mAudio.get(i);
-                require(audio != null && audio.getUrl() != null && audio.getName() != null
+                require(audio != null && notBlank(audio.getUrl()) && audio.getName() != null
                         && audio.getTime() >= 0, "mAudio", i);
             }
         }
         if (backup.mAudioList != null) {
             for (int i = 0; i < backup.mAudioList.size(); i++) {
                 AudioListPOJO audio = backup.mAudioList.get(i);
-                require(audio != null && audio.getBookUrl() != null && audio.getBookName() != null
+                require(audio != null && notBlank(audio.getBookUrl()) && audio.getBookName() != null
                         && audio.getTime() >= 0, "mAudioList", i);
             }
         }
@@ -101,8 +101,12 @@ public class BackupPOJO {
         }
         for (int i = 0; i < books.size(); i++) {
             BookPOJO book = books.get(i);
-            require(book != null && !book.isNull(), key, i);
+            require(book != null && !book.isNull() && notBlank(book.getUrl()) && notBlank(book.getName()), key, i);
         }
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private static void require(boolean valid, String key, int index) throws InvalidBackupException {
