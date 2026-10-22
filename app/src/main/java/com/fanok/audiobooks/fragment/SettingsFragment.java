@@ -97,19 +97,18 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     Context context = getContext();
                     if (context == null) return;
                     new Thread(() -> {
-                        boolean success = false;
+                        int skipped = -1;
                         try (java.io.OutputStream os = context.getContentResolver().openOutputStream(uri)) {
                             if (os != null) {
-                                success = performBackupToStream(context, os);
+                                skipped = performBackupToStream(context, os);
                             }
                         } catch (Exception e) {
                             Log.e("SettingsFragment", "Error writing backup to URI", e);
                         }
-                        boolean finalSuccess = success;
+                        int finalSkipped = skipped;
                         if (getActivity() != null) {
                             getActivity().runOnUiThread(() -> {
-                                Toast.makeText(getContext(),
-                                        finalSuccess ? getString(R.string.backup_created) : getString(R.string.backup_not_created),
+                                Toast.makeText(getContext(), backupResultMessage(finalSkipped),
                                         Toast.LENGTH_SHORT).show();
                             });
                         }
@@ -158,11 +157,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             if (context != null) {
                 new Thread(() -> {
                     String path = DownloadStorageHelper.getDownloadPath(context);
-                    String filePath = backup(path);
+                    int skipped = backup(context, path);
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
-                            Toast.makeText(getContext(),
-                                    filePath != null ? getString(R.string.backup_created) : getString(R.string.backup_not_created),
+                            Toast.makeText(getContext(), backupResultMessage(skipped),
                                     Toast.LENGTH_SHORT).show();
                         });
                     }
@@ -637,32 +635,42 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         updatePrefSummary(findPreference(key));
     }
 
-    private boolean performBackupToStream(Context context, java.io.OutputStream os) {
+    /** Writes a backup; returns the number of unreadable rows left out, or -1 when nothing was written. */
+    private int performBackupToStream(Context context, java.io.OutputStream os) {
         try {
-            BackupPOJO backup = new BackupPOJO();
-            BooksDBModel booksDBModel = new BooksDBModel(context);
-            AudioDBModel audioDBModel = new AudioDBModel(context);
-            AudioListDBModel audioListDBModel = new AudioListDBModel(context);
-
-            backup.setBooksFavorite(booksDBModel.getAllFavorite());
-            backup.setBooksHistory(booksDBModel.getAllHistory());
-            backup.setAudio(audioDBModel.getAll());
-            backup.setAudioList(audioListDBModel.getAll());
-
-            booksDBModel.closeDB();
-            audioDBModel.closeDB();
-            audioListDBModel.closeDB();
-
+            BackupPOJO backup = createBackup(context);
             Gson gson = new GsonBuilder().create();
             try (java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(os, java.nio.charset.StandardCharsets.UTF_8)) {
                 writer.write(gson.toJson(backup));
                 writer.flush();
             }
-            return true;
+            return backup.getSkippedRows();
         } catch (Exception e) {
             Log.e("SettingsFragment", "Backup error", e);
-            return false;
+            return -1;
         }
+    }
+
+    /** Every table restore reads, plus the format version; rows that cannot be read are skipped and counted. */
+    private static BackupPOJO createBackup(Context context) {
+        BooksDBModel booksDBModel = new BooksDBModel(context);
+        AudioDBModel audioDBModel = new AudioDBModel(context);
+        AudioListDBModel audioListDBModel = new AudioListDBModel(context);
+        BackupPOJO backup = new BackupPOJO();
+        backup.setBooksFavorite(booksDBModel.getAllFavorite());
+        backup.setBooksHistory(booksDBModel.getAllHistory());
+        backup.setBooksSaved(booksDBModel.getAllSaved());
+        backup.setAudio(audioDBModel.getAll());
+        backup.setAudioList(audioListDBModel.getAll());
+        backup.setSkippedRows(booksDBModel.getSkippedRows() + audioDBModel.getSkippedRows());
+        if (backup.getSkippedRows() > 0) {
+            Log.w("SettingsFragment", "Backup left out " + backup.getSkippedRows() + " unreadable rows");
+        }
+        return backup;
+    }
+
+    private String backupResultMessage(int skipped) {
+        return getString(skipped >= 0 ? R.string.backup_created : R.string.backup_not_created);
     }
 
     private boolean performRestoreFromStream(Context context, java.io.InputStream is) {
@@ -674,22 +682,16 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     sb.append(line).append("\n");
                 }
             }
-            return restore(sb.toString());
+            return restore(context, sb.toString());
         } catch (Exception e) {
             Log.e("SettingsFragment", "Restore error", e);
             return false;
         }
     }
 
-    private String backup(@NotNull String dir) {
-        BackupPOJO backup = new BackupPOJO();
-        BooksDBModel booksDBModel = new BooksDBModel(getContext());
-        AudioDBModel audioDBModel = new AudioDBModel(getContext());
-        AudioListDBModel audioListDBModel = new AudioListDBModel(getContext());
-        backup.setBooksFavorite(booksDBModel.getAllFavorite());
-        backup.setBooksHistory(booksDBModel.getAllHistory());
-        backup.setAudio(audioDBModel.getAll());
-        backup.setAudioList(audioListDBModel.getAll());
+    /** Returns the number of unreadable rows left out of the written file, or -1 when nothing was written. */
+    private int backup(@NotNull Context context, @NotNull String dir) {
+        BackupPOJO backup = createBackup(context);
         GsonBuilder builder = new GsonBuilder();
         Gson gson = builder.create();
         FileWriter writer;
@@ -699,9 +701,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 Locale.forLanguageTag("UK"));
 
         String name = dir + "/" + formatForDateNow.format(dateNow) + ".json";
-
-        booksDBModel.closeDB();
-        audioDBModel.closeDB();
 
         try {
             File targetDir = new File(dir);
@@ -726,14 +725,14 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                         writer = new FileWriter(name);
                         writer.write(gson.toJson(backup));
                         writer.close();
-                        return name;
+                        return backup.getSkippedRows();
                     }
                 }
             } catch (Exception ignored) {}
-            return null;
+            return -1;
         }
 
-        return name;
+        return backup.getSkippedRows();
     }
 
     private void initSummary(Preference p) {
@@ -783,51 +782,67 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         return myData.toString();
     }
 
-    private boolean restore(@NotNull String file) {
-        BooksDBModel booksDBModel = new BooksDBModel(getContext());
-        AudioDBModel audioDBModel = new AudioDBModel(getContext());
-        AudioListDBModel audioListDBModel = new AudioListDBModel(getContext());
-        boolean returnValue = true;
+    /**
+     * Validates the whole document first, then replaces every table it carries in one transaction, so a bad
+     * file or a failed write leaves the database as it was. A table whose collection is absent is not touched.
+     */
+    private boolean restore(@NotNull Context context, @NotNull String file) {
+        final BackupPOJO backup;
         try {
-            Gson gson = new Gson();
-            BackupPOJO backup = gson.fromJson(file, BackupPOJO.class);
-            booksDBModel.clearFavorite();
-            if (backup.getBooksFavorite() != null) {
-                for (int i = 0; i < backup.getBooksFavorite().size(); i++) {
-                    booksDBModel.addFavorite(backup.getBooksFavorite().get(
-                            backup.getBooksFavorite().size() - 1 - i));
-                }
-            }
-
-            booksDBModel.clearHistory();
-            if (backup.getBooksHistory() != null) {
-                for (int i = 0; i < backup.getBooksHistory().size(); i++) {
-                    booksDBModel.addHistory(
-                            backup.getBooksHistory().get(backup.getBooksHistory().size() - 1 - i));
-                }
-            }
-
-            audioDBModel.clearAll();
-            if (backup.getAudio() != null) {
-                for (int i = 0; i < backup.getAudio().size(); i++) {
-                    audioDBModel.add(backup.getAudio().get(backup.getAudio().size() - 1 - i));
-                }
-            }
-
-            audioListDBModel.clearAll();
-            if (backup.getAudioList() != null) {
-                for (int i = 0; i < backup.getAudioList().size(); i++) {
-                    audioListDBModel.add(backup.getAudioList().get(i));
-                }
-            }
-
-
-        } catch (Exception e) {
-            returnValue = false;
+            backup = BackupPOJO.parse(file);
+        } catch (BackupPOJO.InvalidBackupException e) {
+            Log.w("SettingsFragment", "Backup rejected", e);
+            return false;
         }
-        audioDBModel.closeDB();
-        booksDBModel.closeDB();
-        return returnValue;
+        BooksDBModel booksDBModel = new BooksDBModel(context);
+        AudioDBModel audioDBModel = new AudioDBModel(context);
+        AudioListDBModel audioListDBModel = new AudioListDBModel(context);
+        com.fanok.audiobooks.room.AppDatabase database = booksDBModel.getDatabase();
+        try {
+            database.runInTransaction(() -> {
+                if (backup.getBooksFavorite() != null) {
+                    database.favoriteDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksFavorite().size(); i++) {
+                        booksDBModel.addFavorite(backup.getBooksFavorite().get(
+                                backup.getBooksFavorite().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getBooksHistory() != null) {
+                    database.historyDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksHistory().size(); i++) {
+                        booksDBModel.addHistory(
+                                backup.getBooksHistory().get(backup.getBooksHistory().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getBooksSaved() != null) {
+                    database.savedDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksSaved().size(); i++) {
+                        booksDBModel.addSaved(
+                                backup.getBooksSaved().get(backup.getBooksSaved().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getAudio() != null) {
+                    database.audioDao().deleteAll();
+                    for (int i = 0; i < backup.getAudio().size(); i++) {
+                        audioDBModel.add(backup.getAudio().get(backup.getAudio().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getAudioList() != null) {
+                    audioListDBModel.clearAll();
+                    for (int i = 0; i < backup.getAudioList().size(); i++) {
+                        audioListDBModel.add(backup.getAudioList().get(i));
+                    }
+                }
+            });
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("SettingsFragment", "Restore failed, database left unchanged", e);
+            return false;
+        }
     }
 
     private void showAllert(@NotNull Context context, int message,
