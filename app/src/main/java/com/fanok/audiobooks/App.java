@@ -6,12 +6,14 @@ import android.content.SharedPreferences;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.database.StandaloneDatabaseProvider;
-import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.cache.NoOpCacheEvictor;
 import androidx.media3.datasource.cache.SimpleCache;
+import androidx.media3.exoplayer.offline.DefaultDownloadIndex;
 import androidx.media3.exoplayer.offline.DownloadManager;
+import androidx.media3.exoplayer.scheduler.Requirements;
 import androidx.preference.PreferenceManager;
 
+import com.fanok.audiobooks.net.MemoryCookieJar;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.presenter.BookPresenter;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
@@ -24,6 +26,7 @@ import io.reactivex.plugins.RxJavaPlugins;
 import java.io.File;
 import java.io.IOException;
 import java.net.SocketException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 @UnstableApi
@@ -31,10 +34,19 @@ public class App extends Application {
 
     // proxy removed; call sites deleted in Phase 1
     public static final boolean useProxy = false;
-    private DownloadManager downloadManager;
-    private SimpleCache downloadCache;
+    /** Name of the Media3 download store below the app-specific files directory. */
+    static final String DOWNLOAD_CACHE_DIR = "media3_downloads";
+    private static final String PREF_DOWNLOAD_CACHE_DIR = "media3_download_cache_dir";
 
-    private StandaloneDatabaseProvider databaseProvider;
+    // One download manager, cache and executor for the process lifetime, created once on first use and never
+    // released or re-created: the download folder setting only names where explicit exports go.
+    private volatile DownloadManager downloadManager;
+    private volatile SimpleCache downloadCache;
+    private File downloadCacheDir;
+    private ExecutorService downloadExecutor;
+
+    private volatile StandaloneDatabaseProvider databaseProvider;
+    private static final MemoryCookieJar COOKIE_JAR = new MemoryCookieJar();
 
     private static App instance;
 
@@ -141,6 +153,11 @@ public class App extends Application {
 
     public static okhttp3.OkHttpClient okHttpClientInstance;
 
+    /** Cookies of the shared client: response cookies are resent to their host for the process lifetime. */
+    public static MemoryCookieJar getCookieJar() {
+        return COOKIE_JAR;
+    }
+
     @UnstableApi
     @Override
     public void onCreate() {
@@ -189,7 +206,7 @@ public class App extends Application {
                 java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1);
             } catch (Throwable ignored) {}
 
-            okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder();
+            okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder().cookieJar(COOKIE_JAR);
 
             // Application interceptor (runs before OkHttp adds its own User-Agent): fills in defaults
             // only, never overrides a header the caller or the DownloadUtil resolver already set.
@@ -224,10 +241,6 @@ public class App extends Application {
             e.printStackTrace();
                     }
 
-        // --- ВОЗВРАЩАЕМ ПРОСТОЙ И ПОНЯТНЫЙ КОД ---
-        databaseProvider = new StandaloneDatabaseProvider(this);
-        reinitDownloadManagerAsync();
-
 
         // User's original code
         SharedPreferences pref = PreferenceManager
@@ -254,7 +267,14 @@ public class App extends Application {
 
 
     public StandaloneDatabaseProvider getDatabaseProvider() {
-        return databaseProvider;
+        StandaloneDatabaseProvider provider = databaseProvider;
+        if (provider == null) {
+            synchronized (this) {
+                if (databaseProvider == null) databaseProvider = new StandaloneDatabaseProvider(this);
+                provider = databaseProvider;
+            }
+        }
+        return provider;
     }
 
     public static App getInstance() {
@@ -265,91 +285,76 @@ public class App extends Application {
     public DownloadManager getDownloadManager() {
         DownloadManager dm = downloadManager;
         if (dm == null) {
-            synchronized (this) {
-                dm = downloadManager;
-                if (dm == null) {
-                    reinitDownloadManager();
-                    dm = downloadManager;
-                }
-            }
+            createDownloadStack();
+            dm = downloadManager;
         }
         return dm;
-    }
-
-    public void reinitDownloadManagerAsync() {
-        new Thread(() -> {
-            try {
-                reinitDownloadManager();
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-        }, "reinit-download-manager").start();
-    }
-
-    public synchronized void reinitDownloadManager() {
-        try {
-            stopService(new android.content.Intent(this, com.fanok.audiobooks.service.ExoDownloadService.class));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        if (downloadManager != null) {
-            try {
-                downloadManager.release();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            downloadManager = null;
-        }
-        if (downloadCache != null) {
-            try {
-                downloadCache.release();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            downloadCache = null;
-        }
-
-        File baseDownloadDir = new File(DownloadStorageHelper.getDownloadPath(this));
-        if (!baseDownloadDir.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            baseDownloadDir.mkdirs();
-        }
-        File downloadDirectory = new File(baseDownloadDir, ".audiobooks_cache");
-        if (!downloadDirectory.exists()) {
-            if (!downloadDirectory.mkdirs()) {
-                downloadDirectory = baseDownloadDir;
-            }
-        }
-        try {
-            downloadCache = new SimpleCache(downloadDirectory, new NoOpCacheEvictor(), databaseProvider);
-        } catch (Exception e) {
-            e.printStackTrace();
-            downloadDirectory = new File(getCacheDir(), "downloads");
-            //noinspection ResultOfMethodCallIgnored
-            downloadDirectory.mkdirs();
-            downloadCache = new SimpleCache(downloadDirectory, new NoOpCacheEvictor(), databaseProvider);
-        }
-
-        DataSource.Factory resolvingDataSourceFactory = DownloadUtil.getResolvingUpstreamFactory(this);
-
-        downloadManager = new DownloadManager(
-                this,
-                databaseProvider,
-                downloadCache,
-                resolvingDataSourceFactory,
-                Executors.newFixedThreadPool(3)
-        );
-        downloadManager.setMaxParallelDownloads(1);
     }
 
     public SimpleCache getDownloadCache() {
         SimpleCache cache = downloadCache;
         if (cache == null) {
-            getDownloadManager();
+            createDownloadStack();
             cache = downloadCache;
         }
         return cache;
+    }
+
+    /** Directory of the Media3 download store (app-specific, never the user folder or the clearable cache dir). */
+    public File getDownloadCacheDir() {
+        getDownloadCache();
+        return downloadCacheDir;
+    }
+
+    /**
+     * Creates the download store once: a non-evicting {@link SimpleCache} in app-specific storage, its executor (Media3
+     * downloads HLS segments in parallel on it) and the manager. The volatile manager is published last, so a reader
+     * that sees it also sees the cache.
+     */
+    @UnstableApi
+    private synchronized void createDownloadStack() {
+        if (downloadManager != null) return;
+        File dir = downloadStoreDir();
+        SimpleCache cache = new SimpleCache(dir, new NoOpCacheEvictor(), getDatabaseProvider());
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        DownloadManager dm = new DownloadManager(this, new DefaultDownloadIndex(getDatabaseProvider()),
+                DownloadUtil.downloaderFactory(this, cache, executor));
+        dm.setMaxParallelDownloads(1);
+        dm.setRequirements(new Requirements(Requirements.NETWORK));
+        downloadCacheDir = dir;
+        downloadExecutor = executor;
+        downloadCache = cache;
+        downloadManager = dm;
+    }
+
+    /**
+     * The store directory, chosen once and remembered so it never moves between runs. On first use a store left in
+     * the old place (below the download folder) is moved here when the rename is possible; otherwise its downloads
+     * keep their exported copies and stream again.
+     */
+    private File downloadStoreDir() {
+        SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(this);
+        String saved = pref.getString(PREF_DOWNLOAD_CACHE_DIR, null);
+        if (saved != null) return new File(saved);
+        File base = getExternalFilesDir(null);
+        if (base == null) base = getFilesDir();
+        File dir = new File(base, DOWNLOAD_CACHE_DIR);
+        if (!dir.exists()) {
+            File legacy = new File(DownloadStorageHelper.getDownloadPath(this), ".audiobooks_cache");
+            if (legacy.isDirectory() && legacy.renameTo(dir)) {
+                android.util.Log.i("App", "Moved the download store to " + dir);
+            }
+        }
+        pref.edit().putString(PREF_DOWNLOAD_CACHE_DIR, dir.getAbsolutePath()).apply();
+        return dir;
+    }
+
+    @Override
+    public void onTerminate() {
+        ExecutorService executor = downloadExecutor;
+        if (executor != null) executor.shutdown();
+        DownloadUtil.shutdown();
+        super.onTerminate();
     }
 
 }

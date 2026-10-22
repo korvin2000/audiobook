@@ -118,7 +118,14 @@
             android:id="@+id/textChapterName"
             style="@style/DownloadItemDetailText"
             app:drawableStartCompat="@drawable/ic_bookmark_outline"
-            tools:text="Глава 3 — Сердце пепла" />
+            tools:text="Главы: скачано 3 из 10, выбрано 5" />
+
+        <!-- Главы с копией в папке загрузок -->
+        <TextView
+            android:id="@+id/textExported"
+            style="@style/DownloadItemDetailText"
+            app:drawableStartCompat="@drawable/ic_download"
+            tools:text="Копии в папке: 1, 2, 5" />
 
 
         <TextView

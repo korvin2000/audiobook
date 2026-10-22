@@ -6,31 +6,72 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.common.util.Util;
-import androidx.media3.database.DatabaseProvider;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.DefaultDataSource;
-import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.ResolvingDataSource;
 import androidx.media3.datasource.cache.Cache;
-import androidx.media3.datasource.cache.CacheKeyFactory;
+import androidx.media3.datasource.cache.CacheDataSource;
+import androidx.media3.datasource.cache.ContentMetadata;
+import androidx.media3.datasource.okhttp.OkHttpDataSource;
+import androidx.media3.exoplayer.offline.DefaultDownloaderFactory;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadIndex;
 import androidx.media3.exoplayer.offline.DownloadManager;
+import androidx.media3.exoplayer.offline.DownloadRequest;
+import androidx.media3.exoplayer.offline.DownloadService;
+import androidx.media3.exoplayer.offline.DownloaderFactory;
 
 import com.fanok.audiobooks.App;
 import com.fanok.audiobooks.Url;
+import com.fanok.audiobooks.download.DownloadIds;
+import com.fanok.audiobooks.model.AudioListDBModel;
+import com.fanok.audiobooks.pojo.AudioPOJO;
+import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.room.BooksAudioEntity;
+import com.fanok.audiobooks.service.ExoDownloadService;
+import com.google.gson.Gson;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
+/**
+ * Download identity, request context and cache access around the one {@link DownloadManager} of the process
+ * ({@link App#getDownloadManager()}). Chapter ids come from {@link DownloadIds}; every network request of one
+ * download or playback carries the same immutable book context (Referer, session cookie) through a factory scoped to
+ * that request, so HLS playlists, segments and keys get it as well as the top-level URL.
+ */
 @UnstableApi
 public class DownloadUtil {
 
+    private static final String TAG = "DownloadUtil";
+    private static final String DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36";
+    private static final String LEGACY_REF = "__ref";
 
-    private static DataSource.Factory resolvingUpstreamFactory;
+    /** Off-main bookkeeping of the download listener and the download actions; one thread for the process. */
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
 
     @UnstableApi
     public static DownloadManager getDownloadManager() {
@@ -38,93 +79,100 @@ public class DownloadUtil {
     }
 
     @UnstableApi
-    public static synchronized Cache getDownloadCache() {
+    public static Cache getDownloadCache() {
         return App.getInstance().getDownloadCache();
     }
 
+    public static void runInBackground(@NonNull Runnable task) {
+        WORKER.execute(task);
+    }
 
-    @UnstableApi
-    public static synchronized DataSource.Factory getResolvingUpstreamFactory(Context context) {
-        if (resolvingUpstreamFactory == null) {
-            // No factory User-Agent: OkHttpDataSource would add it as a second header next to the
-            // resolver's one below; the shared client fills in Consts.USER_AGENT when none is set.
-            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory httpBase =
-                    new androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(App.getOkHttpClient());
-            DataSource.Factory upstream = new DefaultDataSource.Factory(context.getApplicationContext(), httpBase);
+    /** Process end only ({@link App#onTerminate}); the worker is never recreated. */
+    public static void shutdown() {
+        WORKER.shutdown();
+    }
 
-            // Пер-запросное добавление заголовков по URI
-            resolvingUpstreamFactory = new ResolvingDataSource.Factory(upstream, dataSpec -> {
-                Uri u = dataSpec.uri;
-                String ref = u.getQueryParameter("__ref");
-                HashMap<String, String> map = new HashMap<>();
+    // ---------------------------------------------------------------- request context
 
-                if (ref != null) {
-                    if (ref.contains("%2F") || ref.contains("%3A")) {
-                        ref = android.net.Uri.decode(ref);
-                    }
-                    if (!ref.startsWith("http://") && !ref.startsWith("https://")) {
-                        ref = "https://" + ref;
-                    }
-                    Uri bookUri = Uri.parse(ref);
-
-                    String bookHost = bookUri.getHost() != null ? bookUri.toString() : "";
-                    if (bookHost.contains(Url.SERVER_ABMP3)) {
-                        map.put("User-Agent",
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36");
-                        map.put("Referer", Url.SERVER_ABMP3 + "/");
-                    } else if (bookHost.contains(Url.SERVER_BAZA_KNIG) || u.getHost() != null && u.getHost().contains(Url.SERVER_BAZA_KNIG)) {
-                        map.put("User-Agent",
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36");
-                        map.put("Referer", Url.SERVER_BAZA_KNIG + "/");
-                        if (!Consts.getBazaKnigCookies().isEmpty()) {
-                            map.put("Cookie", "PHPSESSID=" + Consts.getBazaKnigCookies());
-                        }
-                    } else {
-                        map.put("User-Agent", Consts.USER_AGENT);
-                        map.put("Referer", bookHost);
-                    }
-
-                } else if (u.getHost() != null && u.getHost().contains(Url.SERVER_BAZA_KNIG)) {
-                    map.put("User-Agent",
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36");
-                    map.put("Referer", Url.SERVER_BAZA_KNIG + "/");
-                    if (!Consts.getBazaKnigCookies().isEmpty()) {
-                        map.put("Cookie", "PHPSESSID=" + Consts.getBazaKnigCookies());
-                    }
-                } else {
-                    map.put("User-Agent", Consts.USER_AGENT);
-                    if (u.getHost() != null) {
-                        if (u.getHost().contains("akniga")) {
-                            map.put("Referer", "https://akniga.org/");
-                        } else {
-                            map.put("Referer", "https://" + u.getHost() + "/");
-                        }
-                    }
-                }
-
-                String query = u.getEncodedQuery();
-                if (query != null) {
-                    query = query.replaceAll("(^|&)?__ref=[^&]*", "");
-                    if (query.startsWith("&")) {
-                        query = query.substring(1);
-                    }
-                }
-                Uri cleanUri = u.buildUpon().encodedQuery(query).build();
-
-                // Merge: headers already on the DataSpec win over the per-provider defaults above.
-                map.putAll(dataSpec.httpRequestHeaders);
-                return dataSpec.withUri(cleanUri).withRequestHeaders(map);
-            });
+    /** Headers every request for {@code bookUrl} carries; the client's interceptor fills the default User-Agent. */
+    @NonNull
+    static Map<String, String> requestHeaders(@Nullable String bookUrl) {
+        Map<String, String> headers = new HashMap<>();
+        if (bookUrl == null || bookUrl.isEmpty()) return headers;
+        String book = Url.canonical(bookUrl);
+        if (Url.isHost(book, Url.SERVER_ABMP3)) {
+            headers.put("User-Agent", DESKTOP_UA);
+            headers.put("Referer", Url.SERVER_ABMP3 + "/");
+        } else if (Url.isHost(book, Url.SERVER_BAZA_KNIG)) {
+            headers.put("User-Agent", DESKTOP_UA);
+            headers.put("Referer", Url.SERVER_BAZA_KNIG + "/");
+        } else {
+            headers.put("Referer", book);
         }
-        return resolvingUpstreamFactory;
+        return headers;
     }
 
-    @UnstableApi
-    private static DatabaseProvider getDatabaseProvider() {
-        return App.getInstance().getDatabaseProvider();
-
+    /** Cookies every request for {@code bookUrl} carries unless the host set its own (baza-knig session). */
+    @NonNull
+    static Map<String, String> requestCookies(@Nullable String bookUrl) {
+        String session = Consts.getBazaKnigCookies();
+        if (bookUrl != null && Url.isHost(Url.canonical(bookUrl), Url.SERVER_BAZA_KNIG)
+                && session != null && !session.isEmpty()) {
+            return Collections.singletonMap("PHPSESSID", session);
+        }
+        return Collections.emptyMap();
     }
 
+    /** Network source for every request of one download or playback of {@code bookUrl}. */
+    @NonNull
+    public static DataSource.Factory upstreamFor(@NonNull Context context, @Nullable String bookUrl) {
+        okhttp3.OkHttpClient client = App.getOkHttpClient();
+        Map<String, String> cookies = requestCookies(bookUrl);
+        if (!cookies.isEmpty()) {
+            client = client.newBuilder().cookieJar(App.getCookieJar().with(cookies)).build();
+        }
+        OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(client)
+                .setDefaultRequestProperties(requestHeaders(bookUrl));
+        return new ResolvingDataSource.Factory(
+                new DefaultDataSource.Factory(context.getApplicationContext(), http),
+                dataSpec -> dataSpec.withUri(withoutLegacyRef(dataSpec.uri)));
+    }
+
+    /** Downloader per request: each download fetches through its own book's context. */
+    @NonNull
+    public static DownloaderFactory downloaderFactory(@NonNull Context context, @NonNull Cache cache,
+                                                      @NonNull Executor executor) {
+        final Context app = context.getApplicationContext();
+        return request -> new DefaultDownloaderFactory(
+                new CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstreamFor(app, bookUrlOf(request))),
+                executor).createDownloader(request);
+    }
+
+    /**
+     * Streaming source of the player while it still annotates URIs ({@link #buildAnnotatedUri}): the book context
+     * comes from the {@code __ref} parameter of the top-level URI; HLS children without it get the baza-knig context
+     * by parsed host only.
+     * @deprecated use {@link #playbackFor}, whose factory carries the context to every HLS child request.
+     */
+    @Deprecated
+    @NonNull
+    public static DataSource.Factory getResolvingUpstreamFactory(@NonNull Context context) {
+        OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(App.getOkHttpClient());
+        return new ResolvingDataSource.Factory(new DefaultDataSource.Factory(context.getApplicationContext(), http), dataSpec -> {
+            String book = legacyRefOf(dataSpec.uri);
+            if (book == null && Url.isHost(dataSpec.uri.toString(), Url.SERVER_BAZA_KNIG)) book = Url.SERVER_BAZA_KNIG;
+            Map<String, String> headers = requestHeaders(book);
+            String session = requestCookies(book).get("PHPSESSID");
+            if (session != null) headers.put("Cookie", "PHPSESSID=" + session);
+            headers.putAll(dataSpec.httpRequestHeaders);
+            return dataSpec.withUri(withoutLegacyRef(dataSpec.uri)).withRequestHeaders(headers);
+        });
+    }
+
+    /**
+     * @deprecated the player's legacy streaming URI; new downloads and {@link #playbackFor} use the plain chapter URL.
+     */
+    @Deprecated
     public static Uri buildAnnotatedUri(String fileUrl, String urlBook) {
         if (fileUrl == null || fileUrl.isEmpty()) return Uri.EMPTY;
         if (fileUrl.startsWith("content://") || fileUrl.startsWith("file://")) {
@@ -135,8 +183,301 @@ public class DownloadUtil {
         }
         return Uri.parse(fileUrl)
                 .buildUpon()
-                .appendQueryParameter("__ref", Uri.encode(urlBook))
+                .appendQueryParameter(LEGACY_REF, Uri.encode(urlBook))
                 .build();
     }
 
+    /** The URI without the legacy {@code __ref} parameter; other parameters stay byte-identical, no dangling '?'. */
+    @NonNull
+    static Uri withoutLegacyRef(@NonNull Uri uri) {
+        String query = uri.getEncodedQuery();
+        if (query == null || !query.contains(LEGACY_REF + "=")) return uri;
+        StringBuilder kept = new StringBuilder();
+        for (String part : query.split("&")) {
+            if (part.isEmpty() || part.startsWith(LEGACY_REF + "=")) continue;
+            if (kept.length() > 0) kept.append('&');
+            kept.append(part);
+        }
+        return uri.buildUpon().encodedQuery(kept.length() == 0 ? null : kept.toString()).build();
+    }
+
+    /** Book URL a legacy request carried in {@code __ref}, or null. */
+    @Nullable
+    private static String legacyRefOf(@Nullable Uri uri) {
+        if (uri == null || !uri.isHierarchical()) return null;
+        String ref = uri.getQueryParameter(LEGACY_REF);
+        if (ref == null || ref.isEmpty()) return null;
+        if (ref.contains("%2F") || ref.contains("%3A")) ref = Uri.decode(ref);
+        return ref.startsWith("http://") || ref.startsWith("https://") ? ref : "https://" + ref;
+    }
+
+    // ---------------------------------------------------------------- identity
+
+    /** The book a download belongs to, from its request data. */
+    @Nullable
+    public static BookPOJO bookOf(@NonNull DownloadRequest request) {
+        if (request.data == null || request.data.length == 0) return null;
+        try {
+            return new Gson().fromJson(new String(request.data, StandardCharsets.UTF_8), BookPOJO.class);
+        } catch (Exception e) {
+            Log.w(TAG, "Unreadable download data of " + request.id, e);
+            return null;
+        }
+    }
+
+    /** URL of the book a download belongs to: its request data, else the legacy {@code __ref}; null if unknown. */
+    @Nullable
+    public static String bookUrlOf(@NonNull DownloadRequest request) {
+        BookPOJO book = bookOf(request);
+        if (book != null && book.getUrl() != null && !book.getUrl().isEmpty()) return book.getUrl();
+        return legacyRefOf(request.uri);
+    }
+
+    /** True when both URLs name one book ({@link DownloadIds#bookKey}); exact, never by substring. */
+    public static boolean sameBook(@Nullable String a, @Nullable String b) {
+        return a != null && b != null && DownloadIds.bookKey(a).equals(DownloadIds.bookKey(b));
+    }
+
+    /** Download entries of the rows of one book, in row order. */
+    @NonNull
+    public static List<DownloadIds.Entry> entriesOf(@NonNull String bookUrl, @NonNull List<BooksAudioEntity> rows) {
+        List<String> urls = new ArrayList<>(rows.size());
+        int[] ordinals = new int[rows.size()];
+        for (int i = 0; i < rows.size(); i++) {
+            urls.add(rows.get(i).urlAudio == null ? "" : rows.get(i).urlAudio);
+            ordinals[i] = rows.get(i).ordinal;
+        }
+        return DownloadIds.forBook(bookUrl, urls, ordinals);
+    }
+
+    /**
+     * Download entries of {@code urls}, a chapter list of {@code bookUrl}: the recorded row of each chapter decides its
+     * ordinal; chapters without a row use their position in {@code urls}.
+     */
+    @NonNull
+    public static List<DownloadIds.Entry> entriesFor(@NonNull Context context, @NonNull String bookUrl,
+                                                     @NonNull List<String> urls) {
+        List<BooksAudioEntity> rows = new AudioListDBModel(context).getRows(bookUrl);
+        List<String> rowUrls = new ArrayList<>(rows.size());
+        for (BooksAudioEntity row : rows) rowUrls.add(row.urlAudio == null ? "" : row.urlAudio);
+        List<DownloadIds.Entry> byRow = entriesOf(bookUrl, rows);
+        List<DownloadIds.Entry> byPosition = DownloadIds.forBook(bookUrl, urls, null);
+        int[] at = DownloadIds.align(rowUrls, urls);
+        List<DownloadIds.Entry> result = new ArrayList<>(urls.size());
+        for (int i = 0; i < urls.size(); i++) {
+            result.add(at[i] >= 0 ? byRow.get(at[i]) : byPosition.get(i));
+        }
+        return result;
+    }
+
+    /** The ids a chapter may be downloaded under: its current id, then its legacy id. */
+    @NonNull
+    public static List<String> idsOf(@NonNull DownloadIds.Entry entry) {
+        List<String> ids = new ArrayList<>(2);
+        ids.add(entry.id);
+        if (!entry.legacyId.isEmpty() && !entry.legacyId.equals(entry.id)) ids.add(entry.legacyId);
+        return ids;
+    }
+
+    /**
+     * The download holding the chapter {@code url} of {@code entry}: its current id, else a legacy download that is
+     * this chapter's (same URL, or a legacy id no other chapter shares). Downloads being removed are ignored.
+     */
+    @Nullable
+    public static Download find(@NonNull DownloadIndex index, @NonNull DownloadIds.Entry entry, @Nullable String url) {
+        try {
+            Download download = index.getDownload(entry.id);
+            if (download != null && download.state != Download.STATE_REMOVING) return download;
+            return entry.legacyId.isEmpty() ? null : legacyOf(index.getDownload(entry.legacyId), entry, url);
+        } catch (IOException e) {
+            Log.w(TAG, "Download index unreadable", e);
+            return null;
+        }
+    }
+
+    /** {@link #find(DownloadIndex, DownloadIds.Entry, String)} over a snapshot of downloads by id. */
+    @Nullable
+    public static Download find(@NonNull Map<String, Download> byId, @NonNull DownloadIds.Entry entry, @Nullable String url) {
+        Download download = byId.get(entry.id);
+        if (download != null && download.state != Download.STATE_REMOVING) return download;
+        return legacyOf(byId.get(entry.legacyId), entry, url);
+    }
+
+    @Nullable
+    private static Download legacyOf(@Nullable Download download, @NonNull DownloadIds.Entry entry, @Nullable String url) {
+        if (download == null || download.state == Download.STATE_REMOVING) return null;
+        boolean ownUrl = url != null && withoutLegacyRef(download.request.uri).toString().equals(url);
+        return ownUrl || !entry.legacyShared ? download : null;
+    }
+
+    /**
+     * The download of each of {@code urls}, chapters of {@code bookUrl} (null when unknown: legacy ids only), keyed
+     * by chapter URL; chapters without a download are absent.
+     */
+    @NonNull
+    public static Map<String, Download> downloadsByChapterUrl(@NonNull Context context, @NonNull DownloadIndex index,
+                                                              @Nullable String bookUrl, @NonNull List<String> urls) {
+        List<DownloadIds.Entry> entries = bookUrl != null && !bookUrl.isEmpty()
+                ? entriesFor(context, bookUrl, urls) : DownloadIds.forBook("", urls, null);
+        Map<String, Download> byUrl = new HashMap<>();
+        for (int i = 0; i < urls.size(); i++) {
+            String url = urls.get(i);
+            if (url == null || byUrl.containsKey(url)) continue;
+            Download download = find(index, entries.get(i), url);
+            if (download != null) byUrl.put(url, download);
+        }
+        return byUrl;
+    }
+
+    /** True for a single-file download (exportable); HLS and other adaptive media stay Media3 assets. */
+    public static boolean isProgressive(@NonNull DownloadRequest request) {
+        return Util.inferContentTypeForUriAndMimeType(withoutLegacyRef(request.uri), request.mimeType)
+                == C.CONTENT_TYPE_OTHER;
+    }
+
+    /** Ids of the downloads of {@code bookUrl} in the index (any state but removing). */
+    @NonNull
+    public static Set<String> downloadIdsOfBook(@NonNull DownloadIndex index, @NonNull String bookUrl) {
+        Set<String> ids = new LinkedHashSet<>();
+        try (DownloadCursor cursor = index.getDownloads()) {
+            while (cursor.moveToNext()) {
+                Download d = cursor.getDownload();
+                if (d.state != Download.STATE_REMOVING && sameBook(bookUrl, bookUrlOf(d.request))) ids.add(d.request.id);
+            }
+        } catch (IOException e) {
+            Log.w(TAG, "Download index unreadable", e);
+        }
+        return ids;
+    }
+
+    // ---------------------------------------------------------------- requests
+
+    /**
+     * Queues the downloads of the chosen chapters of {@code book}. A progressive chapter is one download keyed by its
+     * chapter id; HLS chapters sharing a stream URL are one download of that stream. Completed ones are skipped.
+     */
+    public static void addDownloads(@NonNull Context context, @NonNull BookPOJO book, @NonNull List<AudioPOJO> chapters,
+                                    @NonNull Collection<String> chosenUrls) {
+        if (book.getUrl() == null || book.getUrl().isEmpty()) return;
+        List<String> urls = new ArrayList<>(chapters.size());
+        for (AudioPOJO chapter : chapters) urls.add(chapter.getUrl());
+        List<DownloadIds.Entry> entries = entriesFor(context, book.getUrl(), urls);
+        Set<String> chosen = new HashSet<>(chosenUrls);
+        byte[] data = new Gson().toJson(book).getBytes(StandardCharsets.UTF_8);
+        Set<String> queued = new HashSet<>();
+        DownloadIndex index = getDownloadManager().getDownloadIndex();
+        for (int i = 0; i < urls.size(); i++) {
+            String url = urls.get(i);
+            DownloadIds.Entry entry = entries.get(i);
+            if (!chosen.contains(url) || !DeletionPlanner.isRemote(url) || !queued.add(entry.id)) continue;
+            Download existing = find(index, entry, url);
+            if (existing != null && existing.state == Download.STATE_COMPLETED) continue;
+            DownloadRequest request = new DownloadRequest.Builder(entry.id, Uri.parse(url))
+                    .setCustomCacheKey(entry.cacheKey)
+                    .setMimeType(entry.hls ? MimeTypes.APPLICATION_M3U8 : null)
+                    .setData(data)
+                    .build();
+            DownloadService.sendAddDownload(context, ExoDownloadService.class, request, false);
+        }
+    }
+
+    // ---------------------------------------------------------------- playback
+
+    /** What the player plays for one chapter: the media item (clipping is the caller's) and its data source. */
+    public static final class Playback {
+        public final MediaItem.Builder mediaItem;
+        public final DataSource.Factory dataSourceFactory;
+
+        Playback(MediaItem.Builder mediaItem, DataSource.Factory dataSourceFactory) {
+            this.mediaItem = mediaItem;
+            this.dataSourceFactory = dataSourceFactory;
+        }
+    }
+
+    /**
+     * Playback of {@code playlist[index]} of {@code bookUrl}: a local file directly; otherwise the chapter's completed
+     * download (by its own id and cache key, legacy downloads by theirs), else the network, both through the read-only
+     * download cache and the book's request context.
+     */
+    @NonNull
+    public static Playback playbackFor(@NonNull Context context, @Nullable String bookUrl,
+                                       @NonNull List<AudioPOJO> playlist, int index) {
+        String url = playlist.get(index).getUrl();
+        MediaItem.Builder item = new MediaItem.Builder();
+        if (url == null || !DeletionPlanner.isRemote(url)) {
+            Uri local = url == null ? Uri.EMPTY
+                    : url.startsWith("content://") || url.startsWith("file://") ? Uri.parse(url)
+                    : Uri.fromFile(new java.io.File(url));
+            return new Playback(item.setUri(local), new DefaultDataSource.Factory(context));
+        }
+        DownloadIds.Entry entry = null;
+        Download download = null;
+        if (bookUrl != null && !bookUrl.isEmpty()) {
+            List<String> urls = new ArrayList<>(playlist.size());
+            for (AudioPOJO audio : playlist) urls.add(audio.getUrl());
+            entry = entriesFor(context, bookUrl, urls).get(index);
+            download = find(getDownloadManager().getDownloadIndex(), entry, url);
+        }
+        if (download != null && download.state == Download.STATE_COMPLETED) {
+            item.setUri(download.request.uri)
+                    .setCustomCacheKey(download.request.customCacheKey)
+                    .setMimeType(download.request.mimeType)
+                    .setStreamKeys(download.request.streamKeys);
+        } else {
+            boolean hls = Util.inferContentType(Uri.parse(url)) == C.CONTENT_TYPE_HLS;
+            item.setUri(Uri.parse(url))
+                    .setCustomCacheKey(entry != null && !hls ? entry.cacheKey : null)
+                    .setMimeType(hls ? MimeTypes.APPLICATION_M3U8 : null);
+        }
+        DataSource.Factory factory = new CacheDataSource.Factory()
+                .setCache(getDownloadCache())
+                .setUpstreamDataSourceFactory(upstreamFor(context, bookUrl))
+                .setCacheWriteDataSinkFactory(null) // read-only: the download cache holds explicit downloads only
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR);
+        return new Playback(item, factory);
+    }
+
+    // ---------------------------------------------------------------- exact-key cache reads
+
+    /** Cache key of a download's single resource: its custom key, else its URI (Media3's default key). */
+    @NonNull
+    public static String cacheKeyOf(@NonNull DownloadRequest request) {
+        return request.customCacheKey != null ? request.customCacheKey : request.uri.toString();
+    }
+
+    /** Known length of a completed download's resource, or {@link C#LENGTH_UNSET}. */
+    public static long lengthOf(@NonNull Cache cache, @NonNull Download download) {
+        if (download.contentLength != C.LENGTH_UNSET) return download.contentLength;
+        return ContentMetadata.getContentLength(cache.getContentMetadata(cacheKeyOf(download.request)));
+    }
+
+    /**
+     * Copies exactly the cached resource {@code key} (bytes 0..length) to {@code out} from the cache alone: no
+     * upstream, no cache writes, so a missing span fails instead of reading anything else. Throws unless exactly
+     * {@code length} bytes were copied.
+     */
+    public static void copyExact(@NonNull Cache cache, @NonNull String key, @NonNull Uri uri, long length,
+                                 @NonNull OutputStream out) throws IOException {
+        if (length <= 0) throw new IOException("Unknown length of " + key);
+        CacheDataSource source = new CacheDataSource.Factory()
+                .setCache(cache)
+                .setCacheWriteDataSinkFactory(null)
+                .createDataSource();
+        DataSpec spec = new DataSpec.Builder().setUri(uri).setKey(key).setPosition(0).setLength(length).build();
+        long copied = 0;
+        try {
+            source.open(spec);
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = source.read(buffer, 0, buffer.length)) != C.RESULT_END_OF_INPUT) {
+                out.write(buffer, 0, read);
+                copied += read;
+            }
+        } finally {
+            source.close();
+        }
+        if (copied != length) {
+            throw new IOException("Cached " + key + " has " + copied + " of " + length + " bytes");
+        }
+    }
 }
