@@ -1,0 +1,140 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "com.fanok.audiobooks"
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(System.getProperty('user.home') + '/.android/debug.keystore')
+            keyAlias = 'androiddebugkey'
+            storePassword 'android'
+            keyPassword 'android'
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing false
+            enableV4Signing false
+        }
+    }
+    compileSdk 36
+    defaultConfig {
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments += ["room.schemaLocation": "$projectDir/schemas".toString()]
+            }
+        }
+
+        manifestPlaceholders = [YANDEX_CLIENT_ID:"1fb77eec8444492db5758b184d0a259a"]
+
+        applicationId "com.fanok.audiobooks"
+        minSdkVersion 23
+        targetSdkVersion 34
+        versionCode 95
+        versionName "7.3"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables.useSupportLibrary = true
+        signingConfig signingConfigs.release
+
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            debuggable false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility = '1.8'
+        targetCompatibility = '1.8'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.legacy:legacy-support-v4:1.0.0'
+    implementation('com.google.android.material:material:1.13.0') {
+        exclude group: 'androidx'
+    }
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.1'
+    implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation('androidx.lifecycle:lifecycle-extensions:2.2.0') {
+        exclude group: 'androidx'
+    }
+    implementation 'androidx.activity:activity:1.12.2'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.7.0'
+    implementation('com.squareup.picasso:picasso:2.71828') {
+        exclude group: 'com.android.support'
+        exclude module: ['exifinterface', 'support-annotations']
+    }
+    implementation 'io.reactivex.rxjava2:rxjava:2.2.21'
+    implementation 'io.reactivex.rxjava2:rxandroid:2.1.1'
+    implementation 'org.jsoup:jsoup:1.21.2'
+    implementation 'com.r0adkll:slidableactivity:2.1.0'
+    implementation 'com.google.code.gson:gson:2.13.2'
+    implementation 'de.hdodenhof:circleimageview:3.1.0'
+
+    //noinspection GradleDependency
+    implementation 'com.squareup.okhttp3:okhttp:5.3.2'
+    implementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
+    implementation 'androidx.media3:media3-exoplayer:1.9.0'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.9.0'
+    implementation 'androidx.media3:media3-ui:1.9.0'
+    implementation 'androidx.media3:media3-session:1.9.0'
+    implementation 'androidx.media3:media3-datasource-okhttp:1.9.0'
+
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'tech.schoolhelper:moxy-x-androidx:1.7.0'
+    implementation 'tech.schoolhelper:moxy-x:1.7.0'
+    annotationProcessor 'tech.schoolhelper:moxy-x-compiler:1.7.0'
+    implementation 'tech.schoolhelper:moxy-x-material:1.7.0'
+    implementation 'pub.devrel:easypermissions:3.0.0'
+    implementation 'com.github.mendhak:storage-chooser:2.0.4.4'
+    implementation 'com.github.chrisbanes:PhotoView:2.3.0'
+    implementation 'androidx.palette:palette:1.0.0'
+    implementation 'com.github.bumptech.glide:glide:5.0.5'
+    annotationProcessor 'com.github.bumptech.glide:compiler:5.0.5'
+    debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.14'
+
+    implementation 'com.alimuzaffar.lib:pinentryedittext:2.0.6'
+    implementation 'com.google.android.play:review:2.0.2'
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+
+    implementation 'com.github.lzyzsd:circleprogress:1.2.1'
+    implementation 'com.h6ah4i.android.widget.verticalseekbar:verticalseekbar:1.0.0'
+    implementation 'com.diogobernardino:williamchart:2.2'
+
+    implementation 'it.xabaras.android:recyclerview-swipedecorator:1.4'
+
+    implementation 'io.apisense:rhino-android:1.1.1'
+    implementation 'com.github.evgenyneu:js-evaluator-for-android:6.0.0'
+    implementation "androidx.work:work-runtime:2.11.0"
+
+    def room_version = "2.8.4"
+    implementation "androidx.room:room-runtime:$room_version"
+    annotationProcessor "androidx.room:room-compiler:$room_version"
+    implementation "androidx.room:room-rxjava2:$room_version"
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+}

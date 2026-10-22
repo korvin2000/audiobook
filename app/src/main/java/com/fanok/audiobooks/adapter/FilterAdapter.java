@@ -1,0 +1,170 @@
+package com.fanok.audiobooks.adapter;
+
+import android.content.SharedPreferences;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+import com.fanok.audiobooks.Consts;
+import com.fanok.audiobooks.R;
+import java.util.ArrayList;
+
+/** @noinspection ClassEscapesDefinedScope*/
+public class FilterAdapter extends RecyclerView.Adapter<FilterAdapter.MyHolder> {
+
+    class MyHolder extends RecyclerView.ViewHolder {
+
+        private final TextView mText;
+
+        private final View mView;
+
+
+        MyHolder(@NonNull final View itemView) {
+            super(itemView);
+            mText = itemView.findViewById(R.id.textView);
+            mView = itemView;
+            itemView.setOnClickListener(view -> {
+                int newPosition = getBindingAdapterPosition();
+                if (newPosition != RecyclerView.NO_POSITION && newPosition != selected) {
+                    notifyItemChanged(selected);
+                    selected = newPosition;
+                    notifyItemChanged(selected);
+                    if (mListener != null) {
+                        mListener.onItemSelected(view, newPosition);
+                    }
+                }
+            });
+
+
+        }
+
+        void bind(int pos) {
+            if (pos == selected) {
+                mView.setBackgroundResource(R.drawable.filter_selected);
+            } else {
+                mView.setBackgroundResource(R.drawable.filter_item_selector);
+            }
+
+            switch (mData.get(pos)) {
+                case -1:
+                    mText.setText(R.string.all);
+                    break;
+                case Consts.SOURCE_KNIGA_V_UHE:
+                    mText.setText(R.string.kniga_v_uhe);
+                    break;
+                case Consts.SOURCE_IZI_BUK:
+                    mText.setText(R.string.izibuc);
+                    break;
+                case Consts.SOURCE_AUDIO_BOOK_MP3:
+                    mText.setText(R.string.audionook_mp3);
+                    break;
+                case Consts.SOURCE_ABOOK:
+                    mText.setText(R.string.abook);
+                    break;
+                case Consts.SOURCE_BAZA_KNIG:
+                    mText.setText(R.string.baza_knig);
+                    break;
+
+                case Consts.SOURCE_KNIGOBLUD:
+                    mText.setText(R.string.knigoblud);
+                    break;
+
+                case Consts.SOURCE_AUDIOBOO:
+                    mText.setText(R.string.audioboo);
+                    break;
+
+                case Consts.SOURCE_OTRUB:
+                    mText.setText(R.string.otrub);
+                    break;
+
+                case Consts.SOURCE_POLEKNIG:
+                    mText.setText(R.string.poleknig);
+                    break;
+            }
+
+        }
+    }
+
+    public interface OnListItemSelectedInterface {
+
+        void onItemSelected(View view, int position);
+    }
+
+    private final ArrayList<Integer> mData;
+
+    private OnListItemSelectedInterface mListener;
+
+    private int selected = 0;
+
+
+    public FilterAdapter(SharedPreferences preferences) {
+        mData = new ArrayList<>();
+        mData.add(-1);
+
+        if (preferences.getBoolean("search_abook", true)) {
+            mData.add(Consts.SOURCE_ABOOK);
+        }
+
+        if (preferences.getBoolean("search_kniga_v_uhe", true)) {
+            mData.add(Consts.SOURCE_KNIGA_V_UHE);
+        }
+
+        if (preferences.getBoolean("search_izibuc", true)) {
+            mData.add(Consts.SOURCE_IZI_BUK);
+        }
+
+        if (preferences.getBoolean("search_abmp3", true)) {
+            mData.add(Consts.SOURCE_AUDIO_BOOK_MP3);
+        }
+
+        if (preferences.getBoolean("search_baza_knig", true)) {
+            mData.add(Consts.SOURCE_BAZA_KNIG);
+        }
+
+        if (preferences.getBoolean("search_knigoblud", true)) {
+            mData.add(Consts.SOURCE_KNIGOBLUD);
+        }
+
+        if (preferences.getBoolean("search_audioboo", true)) {
+            mData.add(Consts.SOURCE_AUDIOBOO);
+        }
+
+        if (preferences.getBoolean("search_otrub", true)) {
+            mData.add(Consts.SOURCE_OTRUB);
+        }
+
+        if (preferences.getBoolean("search_poleknig", true)) {
+            mData.add(Consts.SOURCE_POLEKNIG);
+        }
+
+    }
+
+    public int getItem(int postion) {
+        return mData.get(postion);
+    }
+
+    @Override
+    public int getItemCount() {
+        return mData.size();
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull MyHolder myHolder, int i) {
+        myHolder.bind(i);
+    }
+
+    @NonNull
+    @Override
+    public MyHolder onCreateViewHolder(@NonNull ViewGroup viewGroup, int i) {
+        View view = LayoutInflater.from(viewGroup.getContext()).inflate(
+                R.layout.simple_row_3, viewGroup, false);
+        return new MyHolder(view);
+    }
+
+    public void setListener(
+            OnListItemSelectedInterface listener) {
+        mListener = listener;
+    }
+}

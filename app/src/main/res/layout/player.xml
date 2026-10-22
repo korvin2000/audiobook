@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/player"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/backgraundColor"
+    android:orientation="vertical"
+    app:behavior_peekHeight="@dimen/player_row_height"
+    app:layout_behavior="@string/bottom_sheet_behavior">
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/player_row_height"
+        android:orientation="vertical"
+        tools:showIn="@layout/fragment_book_coments">
+
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="@dimen/text_margin">
+
+            <ImageButton
+                android:id="@+id/buttonCollapse"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?selectableItemBackgroundBorderless"
+                android:contentDescription="@string/collapse"
+                android:src="@drawable/ic_arrow_down_drop_circle_outline" />
+
+
+            <RadioButton
+                android:id="@+id/radioAll"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:button="@null"
+                android:drawableStart="@drawable/radio_select"
+                android:drawablePadding="@dimen/text_margin_book_description"
+                android:text="@string/all"
+                android:textColor="?attr/colorPrimaryText"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/name_curent"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/text_margin"
+                android:layout_weight="1"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:textColor="?attr/colorPrimaryText"
+                tools:text="0001" />
+
+
+            <ImageButton
+                android:id="@+id/dowland"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="@dimen/text_margin"
+                android:background="?selectableItemBackgroundBorderless"
+                android:contentDescription="@string/dowland"
+                android:src="@drawable/ic_download"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/delete"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="?selectableItemBackgroundBorderless"
+                android:contentDescription="@string/delete"
+                android:src="@drawable/ic_delete"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/topButtonsControls"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/previousTop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="?selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/previous"
+                    android:paddingStart="@dimen/text_margin"
+                    android:paddingEnd="@dimen/text_margin"
+                    android:src="@drawable/ic_skip_previous" />
+
+                <ImageButton
+                    android:id="@+id/playTop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="?selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/play"
+                    android:paddingStart="@dimen/text_margin"
+                    android:paddingEnd="@dimen/text_margin"
+                    android:src="@drawable/ic_play" />
+
+                <ImageButton
+                    android:id="@+id/nextTop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="?selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/next"
+                    android:paddingStart="@dimen/text_margin"
+                    android:paddingEnd="@dimen/text_margin"
+                    android:src="@drawable/ic_skip_next" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/text_margin"
+        android:paddingTop="@dimen/text_margin"
+        android:paddingEnd="0dp">
+
+        <TextView
+            android:id="@+id/timeStart"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?attr/colorPrimaryText"
+            android:text="@string/time_zero" />
+
+        <SeekBar
+            android:id="@+id/seekBar"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/timeEnd"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?attr/colorPrimaryText"
+            android:text="@string/time_zero" />
+
+        <ImageButton
+            android:id="@+id/speed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/speed"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_play_speed" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/player_row_height"
+        android:gravity="center_vertical|center_horizontal"
+        android:orientation="horizontal"
+        android:padding="@dimen/text_margin">
+
+        <ImageButton
+            android:id="@+id/rewind"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/rewind_10"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_rewind_30" />
+
+
+        <ImageButton
+            android:id="@+id/previousBottom"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/previous"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_skip_previous" />
+
+        <ImageButton
+            android:id="@+id/playBottom"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/play"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_play" />
+
+        <ImageButton
+            android:id="@+id/nextBottom"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/next"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_skip_next" />
+
+        <ImageButton
+            android:id="@+id/forward"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?selectableItemBackgroundBorderless"
+            android:contentDescription="@string/forward_30"
+            android:paddingStart="@dimen/text_margin"
+            android:paddingEnd="@dimen/text_margin"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_fast_forward_30" />
+
+
+    </LinearLayout>
+
+
+</LinearLayout>

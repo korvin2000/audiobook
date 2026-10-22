@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="settings_them_titles">
+        <item>@string/theme_dark</item>
+        <item>@string/theme_light</item>
+        <item>@string/theme_black</item>
+    </string-array>
+
+    <string-array name="settings_them_values">
+        <item>@string/theme_dark_value</item>
+        <item>@string/theme_light_value</item>
+        <item>@string/theme_black_value</item>
+    </string-array>
+
+
+    <string-array name="settings_lang_titles">
+        <item>@string/lang_ru</item>
+        <item>@string/lang_ua</item>
+        <item>@string/lang_en</item>
+    </string-array>
+
+    <string-array name="settings_lang_values">
+        <item>ru</item>
+        <item>uk</item>
+        <item>en</item>
+    </string-array>
+
+
+    <string-array name="settings_start_screen_titles">
+        <item>@string/menu_audiobooks</item>
+        <item>@string/menu_genre</item>
+        <item>@string/menu_autor</item>
+        <item>@string/menu_artist</item>
+        <item>@string/menu_favorite</item>
+        <item>@string/menu_history</item>
+        <item>@string/last_book</item>
+        <item>@string/menu_saved</item>
+    </string-array>
+
+    <string-array name="settings_start_screen_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>5</item>
+        <item>6</item>
+        <item>7</item>
+    </string-array>
+
+    <string-array name="settings_sort_titles">
+        <item>@string/sort_title_date</item>
+        <item>@string/sort_title_name</item>
+        <item>@string/sort_title_genre</item>
+        <item>@string/sort_title_autor</item>
+        <item>@string/sort_title_artist</item>
+        <item>@string/sort_title_series</item>
+        <item>@string/sort_title_saved</item>
+    </string-array>
+
+    <string-array name="settings_sort_values">
+        <item>@string/sort_value_date</item>
+        <item>@string/sort_value_name</item>
+        <item>@string/sort_value_genre</item>
+        <item>@string/sort_value_autor</item>
+        <item>@string/sort_value_artist</item>
+        <item>@string/sort_value_series</item>
+        <item>@string/sort_value_saved</item>
+    </string-array>
+
+
+    <string-array name="books_adapter_layout_titles">
+        <item>@string/books_adapter_layout_list_title</item>
+        <item>@string/books_adapter_layout_big_list_title</item>
+    </string-array>
+
+    <string-array name="books_adapter_layout_values">
+        <item>@string/books_adapter_layout_list_value</item>
+        <item>@string/books_adapter_layout_big_list_value</item>
+    </string-array>
+
+    <string-array name="sorce_books_titles">
+        <item>@string/abook</item>
+        <item>@string/kniga_v_uhe</item>
+        <item>@string/izibuc</item>
+        <item>@string/audionook_mp3</item>
+        <item>@string/baza_knig</item>
+        <item>@string/knigoblud</item>
+        <item>@string/audioboo</item>
+        <item>@string/otrub</item>
+        <item>@string/poleknig</item>
+    </string-array>
+
+    <string-array name="sorce_books_values">
+        <item>@string/abook_value</item>
+        <item>@string/kniga_v_uhe_value</item>
+        <item>@string/izibuc_value</item>
+        <item>@string/audiobook_mp3_value</item>
+        <item>@string/baza_knig_value</item>
+        <item>@string/knigoblud_value</item>
+        <item>@string/audioboo_value</item>
+        <item>@string/otrub_value</item>
+        <item>@string/poleknig_value</item>
+    </string-array>
+
+    <string-array name="vpn_titles">
+        <item>@string/no</item>
+        <item>@string/antizapret</item>
+        <item>@string/zaborona</item>
+        <item>@string/zaborona_europe</item>
+        <item>@string/vpn_ukrane</item>
+    </string-array>
+
+    <string-array name="vpn_values">
+        <item>@string/vpn_no_value</item>
+        <item>@string/vpn_antizapret_value</item>
+        <item>@string/vpn_zaborona_value</item>
+        <item>@string/vpn_zaborona_europe_value</item>
+        <item>@string/vpn_ukrane_value</item>
+    </string-array>
+
+    <string-array name="email_catigory">
+        <item>@string/help</item>
+        <item>@string/error</item>
+        <item>@string/recommendation</item>
+    </string-array>
+
+    <string-array name="ratingStarName">
+        <item>@string/vary_bad</item>
+        <item>@string/bad</item>
+        <item>@string/normal</item>
+        <item>@string/good</item>
+        <item>@string/excellent</item>
+    </string-array>
+
+    <array name="paranoid_theme">
+        <!-- Overview -->
+        <item>#151515</item> <!--  Top Header bg -->
+        <item>#2c9633</item> <!-- header text   -->
+        <item>#252525</item> <!-- list bg  -->
+        <item>@android:color/white</item> <!--  storage list name text  -->
+        <item>#e1e1e1</item> <!-- free space text  -->
+        <item>#2c9633</item> <!-- memory bar -->
+
+        <!-- secondary dialog colors -->
+        <item>#e1e1e1</item> <!-- folder tint -->
+        <item>#252525</item> <!-- list bg -->
+        <item>@android:color/white</item> <!-- list text -->
+        <item>#151515</item> <!-- address bar tint -->
+        <item>@color/chevronBgColor</item> <!-- new folder hint tint -->
+        <item>#2c9633</item> <!-- select button color -->
+        <item>#2c9633</item> <!-- new folder layour bg -->
+        <item>#2c9633</item> <!-- fab multiselect color -->
+        <item>#151515</item> <!-- address bar bg -->
+    </array>
+    <string name="knigoblud">Книгоблуд</string>
+</resources>

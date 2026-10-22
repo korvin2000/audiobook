@@ -1,0 +1,596 @@
+package com.fanok.audiobooks.fragment;
+
+import static android.content.Context.UI_MODE_SERVICE;
+import static com.fanok.audiobooks.Consts.MODEL_ARTIST;
+import static com.fanok.audiobooks.Consts.MODEL_AUTOR;
+import static com.fanok.audiobooks.Consts.MODEL_BOOKS;
+import static com.fanok.audiobooks.Consts.MODEL_GENRE;
+import static com.fanok.audiobooks.Consts.setColorPrimeriTextInIconItemMenu;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.app.UiModeManager;
+import android.content.Intent;
+import android.content.res.Configuration;
+import android.os.Bundle;
+import android.util.Log;
+import android.util.TypedValue;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.MenuHost;
+import androidx.core.view.MenuProvider;
+import androidx.fragment.app.Fragment;
+import androidx.lifecycle.Lifecycle;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import com.arellomobile.mvp.MvpAppCompatFragment;
+import com.arellomobile.mvp.presenter.InjectPresenter;
+import com.arellomobile.mvp.presenter.ProvidePresenter;
+import com.fanok.audiobooks.Consts;
+import com.fanok.audiobooks.GridSpacingItemDecoration;
+import com.fanok.audiobooks.R;
+import com.fanok.audiobooks.Url;
+import com.fanok.audiobooks.activity.BookActivity;
+import com.fanok.audiobooks.activity.MainActivity;
+import com.fanok.audiobooks.activity.SearchableActivity;
+import com.fanok.audiobooks.adapter.BooksListAddapter;
+import com.fanok.audiobooks.adapter.GenreListAddapter;
+import com.fanok.audiobooks.databinding.FragmentBooksBinding;
+import com.fanok.audiobooks.interface_pacatge.books.BooksView;
+import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.presenter.BooksPresenter;
+import com.google.android.material.navigation.NavigationView;
+import java.util.ArrayList;
+import java.util.Objects;
+import org.jetbrains.annotations.NotNull;
+
+
+public class BooksFragment extends MvpAppCompatFragment implements BooksView {
+    private static final String TAG = "BooksFragment";
+    private static final String ARG_URL = "url";
+    private static final String ARG_TITLE = "title";
+    private static final String ARG_SUB_TITLE = "sub_title";
+    private static final String ARG_SUB_TITLE_STRING = "sub_title_string";
+    private static final String ARG_MODEL = "model_id";
+
+
+    @InjectPresenter
+    BooksPresenter mPresenter;
+
+    private BooksListAddapter mAddapterBooks;
+
+    private GenreListAddapter mAddapterGenre;
+
+    private FragmentBooksBinding binding;
+
+    private int titleId;
+    private int subTitleId;
+    private String subTitleString;
+    private int modelID;
+    private String mUrl;
+
+    private boolean isTelevision;
+
+    private MenuProvider mMenuProvider;
+
+
+    public static BooksFragment newInstance(@NonNull String url, int title, int modelID) {
+        BooksFragment fragment = new BooksFragment();
+        if (url == null || url.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Variable 'url' contains not url");
+        }
+        Bundle args = new Bundle();
+        args.putString(ARG_URL, url);
+        args.putInt(ARG_TITLE, title);
+        args.putInt(ARG_MODEL, modelID);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    public static BooksFragment newInstance(@NonNull String url, int title, int subTitle,
+            int modelID) {
+        BooksFragment fragment = new BooksFragment();
+        if (url == null || url.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Variable 'url' contains not url");
+        }
+        Bundle args = new Bundle();
+        args.putString(ARG_URL, url);
+        args.putInt(ARG_TITLE, title);
+        args.putInt(ARG_SUB_TITLE, subTitle);
+        args.putInt(ARG_MODEL, modelID);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    public static BooksFragment newInstance(@NonNull String url, int title, String subTitle,
+            int modelID) {
+        BooksFragment fragment = new BooksFragment();
+        if (url == null || url.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Variable 'url' contains not url");
+        }
+        Bundle args = new Bundle();
+        args.putString(ARG_URL, url);
+        args.putInt(ARG_TITLE, title);
+        args.putString(ARG_SUB_TITLE_STRING, subTitle);
+        args.putInt(ARG_MODEL, modelID);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        Log.d(TAG, "onCreate: called");
+        super.onCreate(savedInstanceState);
+        Bundle arg = getArguments();
+        String url = "";
+        if (arg != null) {
+            url = arg.getString(ARG_URL, "");
+            titleId = arg.getInt(ARG_TITLE, 0);
+            subTitleId = arg.getInt(ARG_SUB_TITLE, 0);
+            subTitleString = arg.getString(ARG_SUB_TITLE_STRING, "");
+            modelID = arg.getInt(ARG_MODEL, -1);
+        }
+        if (url.isEmpty()) {
+            throw new IllegalArgumentException("Variable 'url' contains not url");
+        }
+        if (modelID == -1) {
+            throw new IllegalArgumentException("Illegal model id");
+        }
+        mUrl = url;
+
+
+    }
+
+    private final ActivityResultLauncher<Intent> searchActivityLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == Activity.RESULT_OK) {
+                    Intent data = result.getData();
+                    if (data != null) {
+                        mPresenter.onActivityResult(data);
+                    }
+                }
+            });
+
+
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container,
+            Bundle savedInstanceState) {
+
+        binding = FragmentBooksBinding.inflate(inflater, container, false);
+
+        UiModeManager uiModeManager = (UiModeManager) requireContext().getSystemService(UI_MODE_SERVICE);
+        isTelevision = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION);
+
+
+        MenuHost menuHost = requireActivity();
+        mMenuProvider = new MenuProvider() {
+            @Override
+            public void onCreateMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
+
+
+                menu.clear();
+
+                int menuResId;
+                if (mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)) {
+                    menuResId = R.menu.books_izibuk_options_menu;
+                } else if (mUrl.contains(Url.SERVER_BAZA_KNIG)) {
+                    menuResId = R.menu.books_baza_knig_options_menu;
+                } else if (mUrl.contains(Url.SERVER_AUDIOBOO)) {
+                    menuResId = R.menu.books_audioboo_options_menu;
+                } else if (mUrl.contains(Url.SERVER_AKNIGA)) {
+                    menuResId = R.menu.books_akniga_options_menu;
+                } else if (mUrl.contains(Url.SERVER_OTRUB)) {
+                    menuResId = R.menu.books_otrub_options_menu;
+                } else if (mUrl.contains(Url.SERVER_POLEKNIG)) {
+                    menuResId = R.menu.books_poleknig_options_menu;
+                } else {
+                    menuResId = R.menu.books_options_menu;
+                }
+                inflater.inflate(menuResId, menu);
+
+                if (modelID != Consts.MODEL_BOOKS || mUrl.contains("reader") || mUrl.contains("author")
+                        || mUrl.contains("genre") || mUrl.contains("serie") || mUrl.contains("performer")) {
+                    MenuItem sourceItem = menu.findItem(R.id.source);
+                    if (sourceItem != null) sourceItem.setVisible(false);
+                } else {
+                    setColorPrimeriTextInIconItemMenu(menu.findItem(R.id.source), requireContext());
+                }
+
+                if (modelID != Consts.MODEL_BOOKS || mUrl.contains("reader") || mUrl.contains("author") ||
+                        mUrl.contains("serie") || mUrl.contains("cikl") ||
+                        (mUrl.contains(Url.SERVER_ABMP3) && mUrl.contains("genre")) ||
+                        (mUrl.contains(Url.SERVER_IZIBUK) && mUrl.contains("genre")) ||
+                        (mUrl.contains(Url.SERVER_BAZA_KNIG) && mUrl.contains("ispolnitel")) ||
+                        false)  {
+                    MenuItem orderItem = menu.findItem(R.id.order);
+                    if (orderItem != null) orderItem.setVisible(false);
+                } else {
+                    setColorPrimeriTextInIconItemMenu(menu.findItem(R.id.order), requireContext());
+                }
+
+
+
+                setColorPrimeriTextInIconItemMenu(menu.findItem(R.id.app_bar_search), requireContext());
+                            }
+
+                            @Override
+                            public void onPrepareMenu(@NonNull Menu menu) {
+                MenuItem item = null;
+                switch (Consts.getSOURCE()) {
+                    case Consts.SOURCE_ABOOK:
+                        item = menu.findItem(R.id.source_abook);
+                        break;
+                    case Consts.SOURCE_KNIGA_V_UHE:
+                        item = menu.findItem(R.id.source_kniga_v_uhe);
+                        break;
+                    case Consts.SOURCE_IZI_BUK:
+                        item = menu.findItem(R.id.source_izi_book);
+                        break;
+                    case Consts.SOURCE_AUDIO_BOOK_MP3:
+                        item = menu.findItem(R.id.source_audio_book_mp3);
+                        break;
+                    case Consts.SOURCE_BAZA_KNIG:
+                        item = menu.findItem(R.id.source_baza_knig);
+                        break;
+                    case Consts.SOURCE_KNIGOBLUD:
+                        item = menu.findItem(R.id.source_knigoblud);
+                        break;
+                    case Consts.SOURCE_AUDIOBOO:
+                        item = menu.findItem(R.id.source_audioboo);
+                        break;
+                    case Consts.SOURCE_OTRUB:
+                        item = menu.findItem(R.id.source_otrub);
+                        break;
+                    case Consts.SOURCE_POLEKNIG:
+                        item = menu.findItem(R.id.source_poleknig);
+                        break;
+                }
+                if (item != null) {
+                    item.setChecked(true);
+                }
+                boolean isKnigoblud = Consts.getSOURCE() == Consts.SOURCE_KNIGOBLUD;
+                MenuItem todayItem = menu.findItem(R.id.knigoblud_today);
+                if (todayItem != null) todayItem.setVisible(isKnigoblud);
+                MenuItem trendingItem = menu.findItem(R.id.knigoblud_trending);
+                if (trendingItem != null) trendingItem.setVisible(isKnigoblud);
+                MenuItem finishedItem = menu.findItem(R.id.knigoblud_finished);
+                if (finishedItem != null) finishedItem.setVisible(isKnigoblud);
+                MenuItem retingParent = menu.findItem(R.id.reting);
+                if (retingParent != null) retingParent.setVisible(!isKnigoblud);
+                boolean isIzibuk = Consts.getSOURCE() == Consts.SOURCE_IZI_BUK;
+                MenuItem orderItem = menu.findItem(R.id.order);
+                if (orderItem != null) orderItem.setVisible(!isIzibuk);
+                boolean isAbmp3 = Consts.getSOURCE() == Consts.SOURCE_AUDIO_BOOK_MP3;
+                MenuItem popularParent = menu.findItem(R.id.popular_parent);
+                if (popularParent != null) popularParent.setVisible(!isAbmp3);
+                MenuItem retingParent2 = menu.findItem(R.id.reting);
+                if (retingParent2 != null) retingParent2.setVisible(!isAbmp3 && !isKnigoblud);
+                MenuItem abmp3Top100 = menu.findItem(R.id.abmp3_top100);
+                if (abmp3Top100 != null) abmp3Top100.setVisible(isAbmp3);
+                MenuItem abmp3Random = menu.findItem(R.id.abmp3_random);
+                if (abmp3Random != null) abmp3Random.setVisible(isAbmp3);
+                            }
+
+                            @Override
+                            public boolean onMenuItemSelected(@NonNull MenuItem item) {
+                getPresenter().onOptionItemSelected(item.getItemId());
+                return true;
+            }
+        };
+        menuHost.addMenuProvider(mMenuProvider, getViewLifecycleOwner(), Lifecycle.State.RESUMED);
+
+
+        if (titleId != 0) {
+            requireActivity().setTitle(titleId);
+        }
+        ActionBar toolbar = ((AppCompatActivity) requireActivity()).getSupportActionBar();
+        if (toolbar != null) {
+            if (!subTitleString.isEmpty()) {
+                toolbar.setSubtitle(subTitleString);
+            } else if (subTitleId != 0) {
+                toolbar.setSubtitle(subTitleId);
+            } else {
+                toolbar.setSubtitle("");
+            }
+        }
+
+        switch (modelID) {
+            case Consts.MODEL_BOOKS:
+                mAddapterBooks = new BooksListAddapter();
+                binding.list.setAdapter(mAddapterBooks);
+                break;
+            case Consts.MODEL_GENRE:
+            case Consts.MODEL_AUTOR:
+            case Consts.MODEL_ARTIST:
+                mAddapterGenre = new GenreListAddapter();
+                binding.list.setAdapter(mAddapterGenre);
+                break;
+        }
+
+
+        if (isTelevision){
+            binding.refresh.setEnabled(false);
+        }else {
+            binding.refresh.setOnRefreshListener(() -> getPresenter().onRefresh());
+        }
+
+        binding.list.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                super.onScrolled(recyclerView, dx, dy);
+                int lastCompletelyVisibleItemPosition =
+                        ((LinearLayoutManager) Objects.requireNonNull(
+                                recyclerView.getLayoutManager())).findLastVisibleItemPosition();
+                if (modelID != Consts.MODEL_GENRE
+                        && lastCompletelyVisibleItemPosition > getCount() - 15 && dy > 0) {
+                    getPresenter().loadBoks();
+                }
+            }
+        });
+
+        if (mAddapterGenre != null) {
+            mAddapterGenre.setClickListner(
+                    (view1, position) -> mPresenter.onGenreItemClick(view1, position));
+        }
+
+        if (mAddapterBooks != null) {
+            mAddapterBooks.setListener(this::onItemSelected);
+
+            mAddapterBooks.setLongListener(
+                    (view13, position) -> mPresenter.onBookItemLongClick(view13, position,
+                            getLayoutInflater()));
+        }
+
+        int orientation = this.getResources().getConfiguration().orientation;
+
+        int isTablet = getResources().getInteger(R.integer.isTablet);
+
+        if (isTablet == 0) {
+            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                setLayoutManager();
+            } else {
+                setLayoutManager(2);
+            }
+        }
+        if (isTablet > 0) {
+            if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                setLayoutManager(2);
+            } else {
+                setLayoutManager(3);
+            }
+        }
+
+        return binding.getRoot();
+    }
+
+
+
+
+
+
+
+
+    @Override
+    public void onDestroyView() {
+        getPresenter().onDestroy();
+        if (mAddapterBooks != null) {
+            mAddapterBooks.close();
+        }
+        mAddapterBooks = null;
+        mAddapterGenre = null;
+        super.onDestroyView();
+        binding = null;
+    }
+
+    @Override
+    public void recreate() {
+        if (getActivity() == null) return;
+        Intent intent = new Intent(getActivity(), MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        getActivity().startActivity(intent);
+        getActivity().finish();
+    }
+
+    @Override
+    public void showBooksActivity(@NotNull @NonNull BookPOJO bookPOJO) {
+        BookActivity.startNewActivity(requireContext(), bookPOJO);
+    }
+
+    @ProvidePresenter
+    BooksPresenter provideBookPresenter() {
+        Bundle arg = getArguments();
+        String url = "";
+        if (arg != null) {
+            url = arg.getString(ARG_URL, "");
+            titleId = arg.getInt(ARG_TITLE, 0);
+            subTitleId = arg.getInt(ARG_SUB_TITLE, 0);
+            subTitleString = arg.getString(ARG_SUB_TITLE_STRING, "");
+            modelID = arg.getInt(ARG_MODEL, -1);
+        }
+        if (url.isEmpty()) {
+            throw new IllegalArgumentException("Variable 'url' contains not url");
+        }
+        if (modelID == -1) {
+            throw new IllegalArgumentException("Illegal model id");
+        }
+        mUrl = url;
+        String subTitle = "";
+        if (!subTitleString.isEmpty()) {
+            subTitle = subTitleString;
+        } else if (subTitleId != 0) {
+            subTitle = getResources().getString(subTitleId);
+        }
+        return new BooksPresenter(url, modelID, subTitle,
+                requireContext().getApplicationContext());
+    }
+
+    @Override
+    public void setLayoutManager() {
+        binding.list.setLayoutManager(new LinearLayoutManager(this.getContext()));
+        setItemDecoration(1);
+    }
+
+    @Override
+    public void showDataBooks(@NonNull ArrayList<BookPOJO> books) {
+        if (mAddapterBooks != null) {
+            mAddapterBooks.setItem(books); // Используем setData, который мы ранее исправили
+        } else {
+            // Если адаптер еще не создан, это может быть ошибкой в логике,
+            // но на всякий случай можно добавить обработку.
+            showToast(R.string.error_display_data);
+        }
+    }
+
+    @Override
+    public void showDataGenres(@NonNull ArrayList<GenrePOJO> genres) {
+        if (mAddapterGenre != null) {
+            mAddapterGenre.setItem(genres);
+        } else {
+            showToast(R.string.error_display_data);
+        }
+    }
+
+
+    @Override
+    public void clearData() {
+        if (mAddapterBooks != null) mAddapterBooks.clearItem();
+        if (mAddapterGenre != null) mAddapterGenre.clearItem();
+    }
+
+    @Override
+    public void setLayoutManager(int count) {
+        binding.list.setLayoutManager(new GridLayoutManager(this.getContext(), count));
+        setItemDecoration(count);
+    }
+
+    @Override
+    public void showToast(int message) {
+        Toast.makeText(this.getContext(), getResources().getText(message),
+                Toast.LENGTH_LONG).show();
+    }
+
+    @Override
+    public void showToast(String message) {
+        Toast.makeText(this.getContext(), message, Toast.LENGTH_LONG).show();
+    }
+
+    @Override
+    public void setPosition(int position) {
+        Objects.requireNonNull(binding.list.getLayoutManager()).scrollToPosition(position);
+    }
+
+    @Override
+    public void showProgres(boolean b) {
+        if (b) {
+            binding.mProgressBarLayout.getRoot().setVisibility(View.VISIBLE);
+        } else {
+            binding.mProgressBarLayout.getRoot().setVisibility(View.GONE);
+        }
+    }
+
+    @Override
+    public void showFragment(@NonNull Fragment fragment, @NonNull String tag) {
+        MainActivity activity = (MainActivity) getActivity();
+        if (activity != null) {
+            activity.showFragment(fragment, tag);
+        }
+    }
+
+    @Override
+    public void showSearchActivity(int modelId) {
+        Intent intent = new Intent(getContext(), SearchableActivity.class);
+        intent.putExtra(Consts.ARG_MODEL, modelId);
+        searchActivityLauncher.launch(intent);
+    }
+
+    @Override
+    public void showRefreshing(boolean b) {
+        binding.refresh.setRefreshing(b);
+    }
+
+    protected BooksPresenter getPresenter() {
+        return mPresenter;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        MainActivity activity = (MainActivity) getActivity();
+        if (activity != null) {
+            NavigationView navigationView = activity.getNavigationView();
+            ArrayList<TextView> mTextViewArrayList = activity.getTextViewArrayList();
+            final TypedValue SelectedValue = new TypedValue();
+            activity.getTheme().resolveAttribute(R.attr.mySelectableItemBackground, SelectedValue,
+                    true);
+            switch (modelID) {
+                case MODEL_BOOKS:
+                    if (navigationView != null) {
+                        navigationView.setCheckedItem(R.id.nav_audiobooks);
+                    } else if (mTextViewArrayList != null && !mTextViewArrayList.isEmpty()) {
+                        mTextViewArrayList.get(0).setBackgroundResource(SelectedValue.resourceId);
+                    }
+                    break;
+                case MODEL_GENRE:
+                    if (navigationView != null) {
+                        navigationView.setCheckedItem(R.id.nav_genre);
+                    } else if (mTextViewArrayList != null && mTextViewArrayList.size() > 1) {
+                        mTextViewArrayList.get(1).setBackgroundResource(SelectedValue.resourceId);
+                    }
+                    break;
+                case MODEL_AUTOR:
+                    if (navigationView != null) {
+                        navigationView.setCheckedItem(R.id.nav_autor);
+                    } else if (mTextViewArrayList != null && mTextViewArrayList.size() > 2) {
+                        mTextViewArrayList.get(2).setBackgroundResource(SelectedValue.resourceId);
+                    }
+                    break;
+                case MODEL_ARTIST:
+                    if (navigationView != null) {
+                        navigationView.setCheckedItem(R.id.nav_artist);
+                    } else if (mTextViewArrayList != null && mTextViewArrayList.size() > 3) {
+                        mTextViewArrayList.get(3).setBackgroundResource(SelectedValue.resourceId);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private int getCount() {
+        if (mAddapterBooks != null) {
+            return mAddapterBooks.getItemCount();
+        } else if (mAddapterGenre != null) {
+            return mAddapterGenre.getItemCount();
+        } else {
+            return 0;
+        }
+    }
+
+    private void setItemDecoration(int count) {
+        int spacing = (int) getResources().getDimension(R.dimen.recycler_item_margin);
+        boolean includeEdge = true;
+        binding.list.addItemDecoration(new GridSpacingItemDecoration(count, spacing, includeEdge));
+    }
+
+    private void onItemSelected(View view12, int position) {
+        mPresenter.onBookItemClick(view12, position);
+    }
+}

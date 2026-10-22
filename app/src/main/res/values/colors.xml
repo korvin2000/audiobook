@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primaryColor">#37464f</color>
+    <color name="primaryLightColor">#62717b</color>
+    <color name="primaryDarkColor">#101f27</color>
+    <color name="primaryTextColor">#ffffff</color>
+    <color name="blackColor">#414141</color>
+    <color name="hrefColor">#42a5f5</color>
+    <color name="subTextColor">#e0e0e0</color>
+    <color name="colorBackgraund">#303030</color>
+    <color name="selectableItemBackground">#666666</color>
+    <color name="colorDelete">#B70000</color>
+    <color name="colorDeleteLight">#E50000</color>
+
+    <color name="primaryColorLight">#009688</color>
+    <color name="primaryDarkColorLight">#00675b</color>
+    <color name="primaryTextColorLight">#000000</color>
+    <color name="primaryLightColorLight">#52c7b8</color>
+    <color name="lightColor">#999999</color>
+    <color name="colorBackgraundLight">#fafafa</color>
+    <color name="BackgroundItemColor">#eff2ed</color>
+    <color name="selectableItemBackgroundLight">#efefef</color>
+    <color name="colorNavigayionItemLight">#626368</color>
+    <color name="colorAcentPopupWindow">#FFD004</color>
+    <color name="actionBarTrac">#b3000000</color>
+
+    <color name="secondaryColor">#4caf50</color>
+    <color name="primaryColorEq">#212121</color>
+    <color name="primaryLightColorEq">#313131</color>
+    <color name="primaryDarkColorEq">#101010</color>
+    <color name="playingCardColor">#444caf50</color>
+    <color name="textColor">#FAFAFA</color>
+    <color name="imageTint">#80000000</color>
+
+
+    <color name="primaryColorBlack">#202022</color>
+    <color name="primaryDarkColorBlack">#1A1A1B</color>
+    <color name="backgroundSelectedBlack">#ECF2FE</color>
+    <color name="backgraundColorBlack">#0B0B0B</color>
+</resources>

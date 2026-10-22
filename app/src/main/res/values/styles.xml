@@ -1,0 +1,266 @@
+<resources>
+
+    <!-- DARK application theme. -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.DarkActionBar.Bridge">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/primaryColor</item>
+        <item name="colorPrimaryDark">@color/primaryDarkColor</item>
+        <item name="colorPrimaryText">@color/primaryTextColor</item>
+        <item name="colorSelected">@color/primaryTextColor</item>
+        <item name="colorUnSelected">@color/primaryTextColor</item>
+        <item name="backgroundSelected">@color/primaryLightColor</item>
+        <item name="backgroundItem">@color/blackColor</item>
+        <item name="hrefColor">@color/hrefColor</item>
+        <item name="subTextColor">@color/subTextColor</item>
+        <item name="backgraundColor">@color/colorBackgraund</item>
+        <item name="mySelectableItemBackground">@color/selectableItemBackground</item>
+        <item name="colorItemMenu">@color/primaryTextColor</item>
+        <item name="prefIconColor">@color/primaryTextColor</item>
+        <item name="deleteColor">@color/colorDelete</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <style name="AppTheme.AppBarOverlay" parent="ThemeOverlay.MaterialComponents.Dark.ActionBar" />
+
+
+    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.MaterialComponents.Dark" />
+
+    <style name="AppTheme.SwipeOnClose" parent="AppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <style name="AppTheme.NoAnimTheme" parent="AppTheme.NoActionBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <style name="AppTheme.Popup" parent="AppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="windowActionBarOverlay">true</item>
+        <item name="android:statusBarColor">@color/actionBarTrac</item>
+
+        <!-- specify enter and exit transitions -->
+        <!--<item name="android:windowEnterTransition">@transition/explode</item>
+        <item name="android:windowExitTransition">@transition/explode</item>
+-->
+        <!-- specify shared element transitions -->
+        <item name="android:windowSharedElementEnterTransition">
+            @transition/change_image_transform
+        </item>
+        <item name="android:windowSharedElementExitTransition">
+            @transition/change_image_transform
+        </item>
+    </style>
+
+    <style name="AppTheme.Popup2" parent="AppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+
+
+    <style name="MyDialogFadeAnimation">
+        <item name="android:windowEnterAnimation">@anim/enter</item>
+        <item name="android:windowExitAnimation">@anim/exit</item>
+    </style>
+
+
+    <style name="AppTheme.Launcher">
+        <item name="android:windowBackground">@drawable/launch_screen</item>
+    </style>
+
+
+    <!-- BLACK application theme. -->
+
+
+    <style name="AppThemeBlack" parent="Theme.MaterialComponents.DayNight.DarkActionBar.Bridge">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/primaryColorBlack</item>
+        <item name="colorPrimaryDark">@color/primaryDarkColorBlack</item>
+        <item name="colorPrimaryText">@color/primaryTextColor</item>
+        <item name="colorSelected">@color/primaryTextColor</item>
+        <item name="colorUnSelected">@color/primaryTextColor</item>
+        <item name="backgroundSelected">@color/backgroundSelectedBlack</item>
+        <item name="backgroundItem">@color/primaryColorBlack</item>
+        <item name="hrefColor">@color/hrefColor</item>
+        <item name="subTextColor">@color/subTextColor</item>
+        <item name="backgraundColor">@color/colorBackgraund</item>
+        <item name="mySelectableItemBackground">@color/backgroundSelectedBlack</item>
+        <item name="colorItemMenu">@color/primaryTextColor</item>
+        <item name="prefIconColor">@color/primaryTextColor</item>
+        <item name="deleteColor">@color/colorDelete</item>
+    </style>
+
+    <style name="AppThemeBlack.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <style name="AppThemeBlack.AppBarOverlay" parent="ThemeOverlay.MaterialComponents.Dark.ActionBar" />
+
+
+    <style name="AppThemeBlack.PopupOverlay" parent="ThemeOverlay.MaterialComponents.Dark" />
+
+    <style name="AppThemeBlack.SwipeOnClose" parent="AppThemeBlack.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <style name="AppThemeBlack.NoAnimTheme" parent="AppThemeBlack.NoActionBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <style name="AppThemeBlack.Popup" parent="AppThemeBlack.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="windowActionBarOverlay">true</item>
+        <item name="android:statusBarColor">@color/actionBarTrac</item>
+
+        <!-- specify enter and exit transitions -->
+        <!--<item name="android:windowEnterTransition">@transition/explode</item>
+        <item name="android:windowExitTransition">@transition/explode</item>
+-->
+        <!-- specify shared element transitions -->
+        <item name="android:windowSharedElementEnterTransition">
+            @transition/change_image_transform
+        </item>
+        <item name="android:windowSharedElementExitTransition">
+            @transition/change_image_transform
+        </item>
+    </style>
+
+    <style name="AppThemeBlack.Popup2" parent="AppThemeBlack.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+
+
+    <!-- LIGHT application theme. -->
+
+
+    <style name="LightAppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar.Bridge">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/primaryColorLight</item>
+        <item name="colorPrimaryDark">@color/primaryDarkColorLight</item>
+        <item name="colorPrimaryText">@color/primaryTextColorLight</item>
+        <item name="colorSelected">@color/colorNavigayionItemLight</item>
+        <item name="colorUnSelected">@color/colorNavigayionItemLight</item>
+        <item name="backgroundSelected">@color/primaryLightColorLight</item>
+        <item name="backgroundItem">@color/BackgroundItemColor</item>
+        <item name="hrefColor">@color/hrefColor</item>
+        <item name="subTextColor">@color/lightColor</item>
+        <item name="backgraundColor">@color/colorBackgraundLight</item>
+        <item name="mySelectableItemBackground">@color/selectableItemBackgroundLight</item>
+        <item name="colorItemMenu">@color/primaryTextColor</item>
+        <item name="prefIconColor">@color/colorNavigayionItemLight</item>
+        <item name="deleteColor">@color/colorDeleteLight</item>
+        <item name="android:itemBackground">@drawable/custom_ripple</item>
+        <item name="android:itemTextAppearance">@style/myCustomMenuTextAppearanceLight</item>
+
+    </style>
+
+    <style name="myCustomMenuTextAppearanceLight" parent="@android:style/TextAppearance.Widget.IconMenu.Item">
+        <item name="android:textColor">@color/colorNavigayionItemLight</item>
+    </style>
+
+    <style name="LightAppTheme.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <style name="LightAppTheme.AppBarOverlay" parent="ThemeOverlay.MaterialComponents.ActionBar" />
+
+    <style name="LightAppTheme.PopupOverlay" parent="ThemeOverlay.MaterialComponents.Light" />
+
+    <style name="LightAppTheme.SwipeOnClose" parent="LightAppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <style name="LightAppTheme.NoAnimTheme" parent="LightAppTheme.NoActionBar">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+
+    <style name="ImageFullScreen" parent="Theme.MaterialComponents.NoActionBar.Bridge">
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="windowActionBarOverlay">true</item>
+        <item name="android:statusBarColor">@color/actionBarTrac</item>
+
+        <!-- specify enter and exit transitions -->
+        <!--<item name="android:windowEnterTransition">@transition/explode</item>
+        <item name="android:windowExitTransition">@transition/explode</item>
+-->
+        <!-- specify shared element transitions -->
+        <item name="android:windowSharedElementEnterTransition">
+            @transition/change_image_transform
+        </item>
+        <item name="android:windowSharedElementExitTransition">
+            @transition/change_image_transform
+        </item>
+    </style>
+
+    <style name="LightAppTheme.Popup" parent="LightAppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="windowActionBarOverlay">true</item>
+        <item name="android:statusBarColor">@color/actionBarTrac</item>
+
+        <!-- specify enter and exit transitions -->
+        <!--<item name="android:windowEnterTransition">@transition/explode</item>
+        <item name="android:windowExitTransition">@transition/explode</item>
+-->
+        <!-- specify shared element transitions -->
+        <item name="android:windowSharedElementEnterTransition">
+            @transition/change_image_transform
+        </item>
+        <item name="android:windowSharedElementExitTransition">
+            @transition/change_image_transform
+        </item>
+
+
+    </style>
+
+    <style name="LightAppTheme.Popup2" parent="LightAppTheme.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+
+    <style name="CustomSwitch" parent="Theme.MaterialComponents.Light.Bridge">
+        <item name="colorControlActivated">#C95E5E</item>
+        <item name="colorSwitchThumbNormal">#565656</item>
+        <item name="android:colorForeground">#383838</item>
+    </style>
+
+    <style name="DownloadItemDetailText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">?attr/subTextColor</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:drawablePadding">8dp</item>
+    </style>
+
+
+    <style name="TvOptionsMenuItem" parent="Widget.AppCompat.Button.Borderless"><item name="android:layout_width">?attr/actionBarSize</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">@drawable/tv_toolbar_button_selector</item>
+    </style>
+
+
+
+</resources>

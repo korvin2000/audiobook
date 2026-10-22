@@ -1,0 +1,423 @@
+<resources>
+    <string name="app_name" translatable="false">Аудиокниги</string>
+    <string name="navigation_drawer_open">Открыть меню</string>
+    <string name="navigation_drawer_close">Закрыть меню</string>
+
+
+    <!-- NavigetionMenu!-->
+    <string name="menu_audiobooks">Аудиокниги</string>
+    <string name="menu_genre">Жанры</string>
+    <string name="menu_artist">Исполнители</string>
+    <string name="menu_autor">Авторы</string>
+    <string name="menu_favorite">Избранное</string>
+    <string name="menu_history">История</string>
+    <string name="menu_settings">Настройки</string>
+    <string name="menu_about">О программе</string>
+
+
+    <string name="loading">Загрузка…</string>
+    <string name="book_cover">обложка</string>
+
+    <string name="error_load_data">Ошибка. Не удалось загрузить данные</string>
+    <string name="error_display_data">Ошибка отображения данных</string>
+    <string name="search">Поиск</string>
+    <string name="order">Сортировка</string>
+    <string name="new_data">Новое</string>
+    <string name="reting">Рейтинг</string>
+    <string name="all_time">За все время</string>
+    <string name="in_month">За месяц</string>
+    <string name="in_week">За неделю</string>
+    <string name="popular">Популярное</string>
+    <string name="order_new">Новое</string>
+    <string name="order_reting">Рейтинг</string>
+    <string name="order_popular">Популярное</string>
+    <string name="abmp3_top100">Топ100</string>
+    <string name="abmp3_random">Случайная книга</string>
+    <string name="open">Открыть</string>
+    <string name="add_to_favorite">Добавить в избранное</string>
+    <string name="open_author">Перейти к автору</string>
+    <string name="open_genre">Перейти к жанру</string>
+    <string name="open_artist">Перейти к исполнителю</string>
+    <string name="open_series">Перейти к серии</string>
+    <string name="remove_favorite">Удалить из избранного</string>
+    <string name="remove">Удалить</string>
+    <string name="title_activity_book" translatable="false">BookActivity</string>
+    <string name="tab_text_1">Описание</string>
+    <string name="tab_text_2">Комментарии</string>
+    <string name="tab_text_3">Серия</string>
+    <string name="tab_text_5">Другие источники</string>
+    <string name="time_zero" translatable="false">00:00</string>
+    <string name="previous">Предыдущий</string>
+    <string name="play">Воспроизвести</string>
+    <string name="next">Следуйщий</string>
+    <string name="collapse">Свернуть</string>
+    <string name="autor">Автор:</string>
+    <string name="artist">Читает:</string>
+    <string name="series">Серия:</string>
+    <string name="show_more">Читать дальше</string>
+    <string name="other_recomended_books">Рекомендуемые книги</string>
+    <string name="try_again">Попробовать еще</string>
+    <string name="show_less">Скрыть</string>
+    <string name="share">Поделится</string>
+    <string name="add_to_main_screen">Добавить на главный экран</string>
+    <string name="refresh">Обновить</string>
+    <string name="answers">Ответы</string>
+    <string name="close">Закрыть</string>
+    <string name="show_all_answer">Показать все ответы</string>
+    <string name="rewind_10">назад на 10 секунд</string>
+    <string name="forward_30">вперед на 30 секунд</string>
+    <string name="speed">скорость</string>
+    <string name="error_load_coments">Не удалось загрузить комментарии</string>
+    <string name="error_load_books">Не удалось загрузить книги</string>
+    <string name="in_day">За день</string>
+    <string name="in_year">За год</string>
+    <string name="order_discussed">Обсуждаемые</string>
+    <string name="order_collections">Подборки</string>
+    <string name="tab_text_4">Другие озвучки</string>
+    <string name="file_not_dowland">Файл еще не загрузился полностью</string>
+    <string name="notification_channel_name" translatable="false">channelId</string>
+    <string name="no_comments">Комментарии отсутствуют</string>
+    <string name="open_site">Открыть на сайте</string>
+    <string name="worning_loading_not_finish">Данные загружены не до конца. Подождите.</string>
+    <string name="title_set_speed_popup">Выберите скорость</string>
+
+    <!--Settings -->
+    <string name="setting_theme">Тема</string>
+    <string name="theme_dark">Темная</string>
+    <string name="theme_light">Светлая</string>
+
+    <string name="theme_dark_value" translatable="false">dark</string>
+    <string name="theme_light_value" translatable="false">light</string>
+    <string name="theme_black_value" translatable="false">black</string>
+
+    <string name="setting_lang">Язык</string>
+
+    <string name="lang_ru" translatable="false">Русский</string>
+    <string name="lang_ua" translatable="false">Українська</string>
+    <string name="lang_en" translatable="false">English</string>
+
+
+    <string name="setting_start_menu">Категория по умолчанию</string>
+    <string name="setting_sort_favorite">Сортировка избранного</string>
+
+    <string name="sort_title_date">По дате добавления</string>
+    <string name="sort_title_name">По названию</string>
+    <string name="sort_title_genre">По жанру</string>
+    <string name="sort_title_autor">По автору</string>
+    <string name="sort_title_artist">По исполнителю</string>
+    <string name="sort_title_series">По серии</string>
+    <string name="sort_title_saved">По загруженному</string>
+
+    <string name="sort_value_date" translatable="false">date</string>
+    <string name="sort_value_name" translatable="false">name</string>
+    <string name="sort_value_genre" translatable="false">genre</string>
+    <string name="sort_value_autor" translatable="false">autor</string>
+    <string name="sort_value_artist" translatable="false">artist</string>
+    <string name="sort_value_series" translatable="false">series</string>
+    <string name="sort_value_saved" translatable="false">saved</string>
+    <string name="filter">Фильтр</string>
+    <string name="filter_series">Серии</string>
+    <string name="pref_dowland_path">Папка для загрузок</string>
+    <string name="select_folder_description">Выберите папку для загрузки</string>
+    <string name="default_text">По умолчанию</string>
+    <string name="select_folder">Выберите папку</string>
+    <string name="confirm">Подтвердить</string>
+    <string name="clear_history_search">Очистить историю поиска</string>
+    <string name="confirm_clear_history_search">Вы уверены что хотите очистить историю поиска?</string>
+    <string name="yes">Да</string>
+    <string name="cancel">Отмена</string>
+    <string name="confirm_clear_history">Вы уверены что хотите очистить историю?</string>
+    <string name="confirm_clear_favorite">Вы уверены что хотите очистить избранное?</string>
+    <string name="clear_history">Очистить историю</string>
+    <string name="clear_favorite">Очистить избранное</string>
+    <string name="backup">Резервное копирование</string>
+    <string name="backup_summary">Начать резервное копирование</string>
+    <string name="restore">Восстановление</string>
+    <string name="restore_summary">Начать восстановление из резервной копии</string>
+    <string name="confirm_backup">Вы уверены что хотите сделать резервную копию?</string>
+    <string name="confirm_restore">Вы уверены что хотите восстановить данные?</string>
+    <string name="choose_file">Выберите файл</string>
+    <string name="clear">Очистить</string>
+    <string name="backup_created">Резервная копия создана.</string>
+    <string name="backup_not_created">Не удалось создать резервную копию!</string>
+    <string name="worning_not_allowed_write_storege">Приложению не было разрешено записывать данные хранилище.</string>
+    <string name="restored">Данные успешно восстановлены.</string>
+    <string name="error_restored">Ошибка восстановления!</string>
+    <string name="permission_read_external_storage">Разрешение на чтение файлов</string>
+    <string name="worning_not_allowed_read_storege">Приложению не было разрешено чиать данные с хранилища.</string>
+    <string name="select">Выбрать</string>
+    <string name="create">Создать</string>
+    <string name="new_folder">Новая папка</string>
+    <string name="folder_created">Папка создана</string>
+    <string name="error_folder_create">Ошибка создания</string>
+    <string name="empty_text">Пустое поле</string>
+    <string name="import_favorite">Импорт избранного</string>
+    <string name="import_description">Импортировать избранное с сайта</string>
+    <string name="kniga_v_uhe">Книга в ухе</string>
+    <string name="kniga_v_uhe_description">Импортировать с сайта \"Книга в ухе\"</string>
+    <string name="action_import">Импортировать</string>
+    <string name="prompt_password">Пароль</string>
+    <string name="prompt_username">Имя пользователя</string>
+    <string name="error_import">Не удалось импортировать данные</string>
+    <string name="import_complite">Данные импортированы</string>
+    <string name="worong_data_sorce">Неверный источник данных</string>
+    <string name="incorect_login_or_password">Невероне имя пользователя или пароль</string>
+    <string name="back">Назад</string>
+    <string name="error_load_photo">Не удалось загрузить изображение</string>
+
+    <!--ADS -->
+
+    <!--
+        baner
+        ca-app-pub-3595775191373219/3956116171 release
+        ca-app-pub-3940256099942544/6300978111 debug
+
+        interstitia
+        ca-app-pub-3595775191373219/9647426557 release
+        ca-app-pub-3940256099942544/1033173712 debug
+
+        rewarded
+        ca-app-pub-3595775191373219/9946826337 release
+        ca-app-pub-3940256099942544/5224354917 debug
+
+     -->
+    <string name="bunerID" translatable="false">ca-app-pub-3940256099942544/6300978111</string>
+    <string name="interstitiaID" translatable="false">ca-app-pub-3940256099942544/1033173712</string>
+    <string name="rewardedID" translatable="false">ca-app-pub-3940256099942544/5224354917</string>
+    <string name="setIgnoredBatteryOptimyze">Для корректной работы приложения необходимо добавить его в список игнорирования экономии заряда батареи (Battery optimizetion).</string>
+
+
+    <!--About -->
+    <string name="privacy">Условия использования</string>
+    <string name="donate" translatable="false">Donate</string>
+    <string name="donate_summary">Поддержать проект</string>
+    <string name="write_autor">Написать автору</string>
+    <string name="getPlus">Получить Plus версию</string>
+    <string name="how_is">Что это?</string>
+    <string name="version">Версия</string>
+    <string name="privacy_message">Все аудиокниги в приложении проигрываются с открытых ресурсов. Приложение осуществляет только поиск на таких ресурсах. Разработчики приложения не несут ответственность за данные аудио. Если вы обнаружили аудио, которое нарушает Ваши права интеллектуальной собственности, просим перейти по ссылке на сайт источник и обратиться к администрации данного сайта.</string>
+    <string name="MonobanckUAH" translatable="false">Monobank UAH</string>
+    <string name="Monobanck" translatable="false">Monobank</string>
+    <string name="MonobanckNumberUAH" translatable="false">5375 4114 0050 6411</string>
+    <string name="MonobanckUSD" translatable="false">Monobank USD</string>
+    <string name="MonobanckNumberUSD" translatable="false">5375 4188 0202 2079</string>
+    <string name="MonobanckEUR" translatable="false">Monobank EUR</string>
+    <string name="MonobanckNumberEUR" translatable="false">5375 4199 0104 6886</string>
+    <string name="privat">ПриватБанк</string>
+    <string name="privatNumber" translatable="false">5168 7573 6995 1399</string>
+    <string name="alpha">АльфаБанк UA</string>
+    <string name="alphaNumber" translatable="false">5355 5712 8204 2217</string>
+    <string name="psb">Промсвязьбанк</string>
+    <string name="psbNumber" translatable="false">2200 0303 2768 4834</string>
+    <string name="paypal" translatable="false">PayPal</string>
+    <string name="paypalEmail" translatable="false">fanok.inc@gmail.com</string>
+    <string name="qiwi" translatable="false">QIWI</string>
+    <string name="qiwiNumber" translatable="false">ONAMA629</string>
+    <string name="webmoney" translatable="false">WebMoney</string>
+    <string name="wmu" translatable="false">WMU</string>
+    <string name="wmuNumber" translatable="false">U194698990241</string>
+    <string name="wmr" translatable="false">WMR</string>
+    <string name="wmrNumber" translatable="false">R412052005163</string>
+    <string name="wmz" translatable="false">WMZ</string>
+    <string name="wmzNumber" translatable="false">Z159651802111</string>
+    <string name="wme" translatable="false">WME</string>
+    <string name="wmeNumber" translatable="false">E389430023033</string>
+    <string name="copied">Скопировано</string>
+    <string name="help">Помощь</string>
+    <string name="error">Ошибка</string>
+    <string name="recommendation">Рекомендация</string>
+    <string name="send">Отправить</string>
+    <string name="message">Сообщение</string>
+    <string name="email" translatable="false">Email</string>
+    <string name="incorect_email">Неверный адрес электронной почты</string>
+    <string name="sending_email">Отправка сообщения…</string>
+    <string name="no_books">Поиск не дал результатов.</string>
+    <string name="error_send_mail">Не удалось отправить сообщение!</string>
+    <string name="email_send">Сообщение отправлено</string>
+    <string name="message_help_disable_battery_optimisetion">Здравствуйте! Помогите пожалуйста отключить режим экономии заряда батареи на моем устройстве.</string>
+    <string name="icon" translatable="false">icon</string>
+    <string name="support_project">Поддержка проекта</string>
+    <string name="download_plus">Скачивайте любимое</string>
+    <string name="shortcut">Создавайте ярлыки (Android 8 и выше)</string>
+    <string name="ads_free">Без рекламы</string>
+    <string name="buy">Купить</string>
+    <string name="price">Цена: 2.50 $</string>
+    <string name="getPlusTitle">Получить Plus версию</string>
+    <string name="getPlusSubTitle">Купив Plus версию вы получите полный доступ к приложению на неограниченый срок.</string>
+    <string name="congratulations">Поздравляем</string>
+    <string name="plusSubTitle">Plus версия успешно оформлена. Спасибо что вы поддержали проект.</string>
+    <string name="error_buy">Не удалось оформить Plus версию</string>
+    <string name="good">Хорошо</string>
+
+    <string name="parental_control">Родительский контроль</string>
+    <string name="enabled_parental_control">Вы хотите включить родительский контроль?</string>
+    <string name="title_activity_parental_control">Родительский контроль</string>
+    <string name="parental_control_enabled">Включить родительский контроль</string>
+    <string name="enter_password">Введите пароль</string>
+    <string name="incorect_password">Неверный пароль</string>
+    <string name="enter_new_password">Введите новый пароль</string>
+    <string name="only_plus">Данная функция доступна только для обладателей Plus версии.</string>
+    <string name="all">Все</string>
+    <string name="dowland">Скачать</string>
+    <string name="of">из</string>
+    <string name="completed">Завершено</string>
+    <string name="pause">Пауза</string>
+    <string name="stop">Остановить</string>
+    <string name="loading_completed">Загрузка завершена</string>
+    <string name="error_load_file">Не удалось загрузить файл</string>
+    <string name="submit">Отправить</string>
+    <string name="later">Позже</string>
+    <string name="rating_title">Вам нравиться приложение?</string>
+    <string name="ration_desc">Пожалуйста, оцените приложение</string>
+    <string name="vary_bad">Очень плохо</string>
+    <string name="bad">Плохо</string>
+    <string name="normal">Нормально</string>
+    <string name="excellent">Отлично</string>
+    <string name="tech_support_plus">Улучшенная техподдержка</string>
+    <string name="rewardedad_not_loaded">Реклама еще не загружена</string>
+    <string name="sleep_timer">Таймер сна</string>
+    <string name="delete">Удалить</string>
+    <string name="numb_1" translatable="false">1</string>
+    <string name="numb_2" translatable="false">2</string>
+    <string name="numb_3" translatable="false">3</string>
+    <string name="numb_5" translatable="false">5</string>
+    <string name="numb_4" translatable="false">4</string>
+    <string name="numb_6" translatable="false">6</string>
+    <string name="numb_7" translatable="false">7</string>
+    <string name="numb_8" translatable="false">8</string>
+    <string name="numb_9" translatable="false">9</string>
+    <string name="numb_0" translatable="false">0</string>
+    <string name="hours">ч.</string>
+    <string name="minutes">м.</string>
+    <string name="seconds">с.</string>
+    <string name="zero_time" translatable="false">00</string>
+    <string name="equalizer">Эквалайзер</string>
+    <string name="yd">ЮMoney</string>
+    <string name="ydNumb" translatable="false">410014301337309</string>
+    <string name="yandex_form">Яндекс форма</string>
+    <string name="exit">Выход</string>
+    <string name="exit_confirm">Сохранить изменение?</string>
+    <string name="no">Нет</string>
+    <string name="not_can_writing">Недостаточно прав на запись в данную папку.</string>
+    <string name="no_sdcard">SD карта не установлена</string>
+    <string name="reproduction">Воспроизведение</string>
+    <string name="reproduction_desc">При открытии новой книги продолжать воспроизводить старую</string>
+    <string name="autoplay">Автовоспроизведение</string>
+    <string name="autoplay_desc">Запускать книги сразу после открытия</string>
+    <string name="open_4pda">Открыть тему на 4pda</string>
+    <string name="dowland_delete">Скачать/Удалить</string>
+    <string name="delete_complite">Удаление завершено</string>
+    <string name="seekTo">Перемотка</string>
+    <string name="seekToPauseDesc">Снимать плеер с паузы во время перемотки</string>
+    <string name="scrollToSelected">Переход к активному файлу</string>
+    <string name="scrollToSelectedDesc">Первым в списке будет стоять активный аудиофайл</string>
+    <string name="offline">Офлайн</string>
+    <string name="ofline_desc">Скрывать незагруженные главы из списка в офлайн режиме</string>
+    <string name="go_offline">Переход в офлайн режим</string>
+    <string name="clear_saving">Очистить сохраненное</string>
+    <string name="saved_file_not_found">Сохраненные файлы не найдены</string>
+    <string name="no_selecetd">Нет выбранных элементов</string>
+    <string name="android_auto" translatable="false">Andoid Auto</string>
+    <string name="android_auto_desc">Оптимизировать под Android Auto</string>
+    <string name="books_adapter_layout">Режим отображения списка</string>
+    <string name="search_desc">Выполнять глобальный поиск книг из истории и избранного</string>
+    <string name="battary_optimize" translatable="false">Battery Optimization</string>
+    <string name="battary_optimize_desc">Проверить включен ли режим экономии заряда батареи</string>
+    <string name="enabled">Включен</string>
+    <string name="disenabled">Выключен</string>
+    <string name="reqest_battary_optimisation">Отключить режим экономии заряда батареи</string>
+    <string name="do_not_how">Не показывать</string>
+    <string name="sorce_books">Источник</string>
+
+    <string name="dir_title_emulated">Внутренняя</string>
+    <string name="dir_title_sdcrd">SD карта</string>
+    <string name="dir_value_emulated" translatable="false">emulated</string>
+    <string name="dir_value_sdcrd" translatable="false">sdcrd</string>
+    <string name="dir_value_download" translatable="false">download</string>
+    <string name="dir_title_download">Загрузки (для сторонних плееров)</string>
+    <string name="last_book">Последняя открытая книга</string>
+    <string name="books_adapter_layout_list_title">Список</string>
+    <string name="books_adapter_layout_big_list_title">Большой список</string>
+    <string name="books_adapter_layout_list_value" translatable="false">list</string>
+    <string name="books_adapter_layout_big_list_value" translatable="false">big_list</string>
+    <string name="abook_value" translatable="false">abook</string>
+    <string name="abook" translatable="false">Akniga</string>
+    <string name="kniga_v_uhe_value" translatable="false">kniga_v_uhe</string>
+    <string name="izibuc_value" translatable="false">izibuc</string>
+    <string name="izibuc">ИзиБук</string>
+    <string name="audionook_mp3" translatable="false">AudioBook-mp3</string>
+    <string name="audiobook_mp3_value" translatable="false">audiobook_mp3</string>
+    <string name="baza_knig">База Книг</string>
+    <string name="baza_knig_value" translatable="false">baza_knig</string>
+    <string name="knigoblud_value" translatable="false">knigoblud</string>
+    <string name="audioboo_value" translatable="false">audioboo</string>
+    <string name="menu_saved">Загруженные</string>
+    <string name="clear_audio_list">Очистить список аудио файлов</string>
+    <string name="confirm_clear_audio_list">Вы уверены что хотите очистить список аудио файлов</string>
+    <string name="history_procent">Отобразить процент прослушанного</string>
+    <string name="history_procent_desc">Отображать процент прослушанного в избранном и в истории</string>
+    <string name="proxy_desc">Использовать прокси для обхода блокировок</string>
+    <string name="proxy">Прокси</string>
+    <string name="incorect_fomat_proxy_server">Неверный формат IP адреса</string>
+    <string name="incorect_fomat_port">Неверный порт</string>
+    <string name="rewind">Перемотка</string>
+    <string name="rewind_desc">Перемотка назад во время долгой паузы</string>
+    <string name="source">Источник</string>
+    <string name="buffer_size">Размер буфера в секундах (макс 999с)</string>
+    <string name="rewind_back">Перемотка назад</string>
+    <string name="source_search">Источники поиска</string>
+    <string name="source_search_desc">Выбрать источники по которым будет осуществляться поиск</string>
+    <string name="speed_up_search_abmp3">Ускорить поиск по источнику Audiobook-mp3</string>
+    <string name="speed_up_search_abmp3_desc">Ускоряет поиск книг за счет уменьшения количества загружаемых данных. Скорость поиска увеличиться в 4 раза</string>
+    <string name="theme_black">Черная</string>
+    <string name="abook_description">Импортировать с сайта \"Akniga\"</string>
+    <string name="section_not_available">У данного источника такого раздела не существует. Воспользуйтесь кнопкой поиска</string>
+    <string name="comets">Комментарии</string>
+    <string name="years">Год</string>
+    <string name="order_coments">Комментарии</string>
+    <string name="order_year">По годам</string>
+    <string name="order_title">По алфавиту</string>
+    <string name="order_duration">По длительности</string>
+    <string name="knigoblud_today">Слушают сегодня</string>
+    <string name="knigoblud_trending">В тренде</string>
+    <string name="knigoblud_finished">Дослушивают до конца</string>
+    <string name="error_decode">Не удалось расшифровать данные</string>
+    <string name="use_vpn">Использовать VPN</string>
+    <string name="antizapret">Антизапрет (Россия)</string>
+    <string name="zaborona">Заборона (Украина)</string>
+    <string name="zaborona_europe">Заборона Европа (для тех у кого не работает Заборона)</string>
+    <string name="vpn_ukrane">VPN с сервером в Украине</string>
+    <string name="vpn_no_value" translatable="false">no_vpn</string>
+    <string name="vpn_antizapret_value" translatable="false">antizapret</string>
+    <string name="vpn_zaborona_value" translatable="false">zaborona</string>
+    <string name="vpn_zaborona_europe_value" translatable="false">zaborona_europe</string>
+    <string name="vpn_ukrane_value" translatable="false">vpn_ukrane</string>
+    <string name="cookes_baza_knig_exeption">У источника База Книг сработала защита от DDoS атак, для ее обхода перезагрузите или выберете другой сервер VPN</string>
+    <string name="getCookies">Получить Cookies</string>
+    <string name="cookies_info_baza_knig">Для доступа к источнику База Книг необходимо обновить Cookies</string>
+    <string name="error_cookies_load">Не удалось обновить cookies</string>
+    <string name="cookies_loaded">Cookies обновлены</string>
+    <string name="wait_loading">Подождите пока страница закончится, а затем закройте окно</string>
+    <string name="end_chapter">Конец главы</string>
+    <string name="sleep_timer_started">Таймер сна запущен, обратній отчет пойдет после того как книга будет снята с паузы</string>
+    <string name="multithreading">Многопоточность</string>
+    <string name="search_multithreading">Использовать многопоточность для поиска</string>
+    <string name="cutting_file">Разделить файл на разделы</string>
+    <string name="cutting_file_desc">Разделять книги источника, в котором данные залиты одним файлом, на главы</string>
+    <string name="thanks">Спасибо!</string>
+    <string name="hls_download_channel_name">HLS Downloads</string>
+    <string name="open_rustore">RuStore</string>
+    <string name="exo_download_notification_channel_name">Downloads</string>
+    <string name="download">Загрузки</string>
+    <string name="confirm_clear_saved">Вы уверены, что хотите очистить все загруженные файлы?</string>
+    <string name="downloadIcon">Иконка</string>
+    <string name="status_icon">Иконка статуса загрузки</string>
+    <string name="toggle_details">Показать детали</string>
+    <string name="download_control_button">Возобновить/Пауза</string>
+    <string name="more_options">Дополнительно</string>
+    <string name="audioboo">Audioboo</string>
+    <string name="otrub">Отрубин</string>
+    <string name="otrub_value" translatable="false">otrub</string>
+    <string name="poleknig">Полекниг</string>
+    <string name="poleknig_value" translatable="false">poleknig</string>
+</resources>
