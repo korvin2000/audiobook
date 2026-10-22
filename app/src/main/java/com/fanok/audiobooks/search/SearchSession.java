@@ -205,16 +205,6 @@ public final class SearchSession<T> {
     private void apply(Source<T> s, ProviderPage<T> page) {
         pending--;
         statuses.put(s, page.status);
-        if (page.isFailure()) {
-            failed.add(s); // the cursor stays, so a retry asks for the same page
-        } else {
-            failed.remove(s);
-            if (page.hasMore) {
-                nextPage.put(s, nextPage.get(s) == null ? 2 : nextPage.get(s) + 1);
-            } else {
-                nextPage.remove(s);
-            }
-        }
         boolean added = false;
         for (T item : page.items) {
             String k;
@@ -226,6 +216,18 @@ public final class SearchSession<T> {
             if (k == null || seen.add(k)) {
                 items.add(item);
                 added = true;
+            }
+        }
+        if (page.isFailure()) {
+            failed.add(s); // the cursor stays, so a retry asks for the same page
+        } else {
+            failed.remove(s);
+            // a page of nothing but seen items ends the source, as in listings: some providers
+            // repeat their last page for any page number past the end
+            if (page.hasMore && (added || page.items.isEmpty())) {
+                nextPage.put(s, nextPage.get(s) == null ? 2 : nextPage.get(s) + 1);
+            } else {
+                nextPage.remove(s);
             }
         }
         if (added) {

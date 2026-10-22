@@ -218,7 +218,8 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
         if (bookList == null) {
             return ProviderPage.empty();
         }
-        ArrayList<BookPOJO> result = cards(bookList.getElementsByClass("bookkitem"), book -> {
+        Elements raw = bookList.getElementsByClass("bookkitem");
+        ArrayList<BookPOJO> result = cards(raw, book -> {
             if (!book.getElementsByClass("bookkitem_litres_icon").isEmpty()) {
                 return null;
             }
@@ -292,7 +293,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             }
             return bookPOJO;
         });
-        return ProviderPage.of(result, hasMore);
+        return ProviderPage.of(result, hasMore, raw.size());
     }
 
     static ProviderPage<BookPOJO> parseAbmp3(Document doc, int page) {
@@ -344,7 +345,8 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
 
     static ProviderPage<BookPOJO> parseAkniga(Document document, int page) {
         boolean hasMore = !document.select(".page__nav .page__nav--next").isEmpty();
-        ArrayList<BookPOJO> result = cards(document.getElementsByClass("content__main__articles--item"), book -> {
+        Elements raw = document.getElementsByClass("content__main__articles--item");
+        ArrayList<BookPOJO> result = cards(raw, book -> {
             if (!book.getElementsByAttributeValue("href", Url.SERVER_AKNIGA + "/paid/").isEmpty()) {
                 return null;
             }
@@ -444,7 +446,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             }
             return bookPOJO;
         });
-        return ProviderPage.of(result, hasMore);
+        return ProviderPage.of(result, hasMore, raw.size());
     }
 
     static ProviderPage<BookPOJO> parseBazaKnig(Document doc, int page) {
@@ -454,7 +456,8 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
         if (conteiner == null) {
             return ProviderPage.empty();
         }
-        ArrayList<BookPOJO> result = cards(conteiner.getElementsByClass("short"), book -> {
+        Elements raw = conteiner.getElementsByClass("short");
+        ArrayList<BookPOJO> result = cards(raw, book -> {
             BookPOJO bookPOJO = new BookPOJO();
             Element imgConteiner = book.selectFirst(".short-img");
             if (imgConteiner != null) {
@@ -520,7 +523,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             }
             return bookPOJO;
         });
-        return ProviderPage.of(result, hasMore);
+        return ProviderPage.of(result, hasMore, raw.size());
     }
 
     static ProviderPage<BookPOJO> parseIzibuk(Document document, String url, int page) {
@@ -535,7 +538,8 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
         }
         Element h1 = document.selectFirst("h1");
         final String pageTitle = h1 == null ? null : nonEmpty(h1.text());
-        ArrayList<BookPOJO> result = cards(listParent.getElementsByClass("_ccb9b7"), book -> {
+        Elements raw = listParent.getElementsByClass("_ccb9b7");
+        ArrayList<BookPOJO> result = cards(raw, book -> {
             BookPOJO bookPOJO = new BookPOJO();
             Element genre = book.selectFirst("._680f12 > *");
             if (genre != null) {
@@ -611,7 +615,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             }
             return bookPOJO;
         });
-        return ProviderPage.of(result, hasMore);
+        return ProviderPage.of(result, hasMore, raw.size());
     }
 
     /** ABMP3's search returns every hit at once: one request per page, sliced locally, no book-page fetches (SRCH-13). */
@@ -671,7 +675,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             }
             return bookPOJO;
         });
-        return ProviderPage.of(result, hits.size() > to);
+        return ProviderPage.of(result, hits.size() > to, to - from);
     }
 
     static String getAbmp3CoverUrl(String href) {

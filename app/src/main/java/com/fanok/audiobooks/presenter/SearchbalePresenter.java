@@ -68,6 +68,8 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
     private ArrayList<GenrePOJO> genre;
 
     private String query;
+    /** A run was cancelled before it finished; the next attach starts it again when nothing was shown. */
+    private boolean mInterrupted;
 
     public SearchbalePresenter(int modelId, @NonNull Context context) {
         mPreferences = PreferenceManager.getDefaultSharedPreferences(context);
@@ -99,6 +101,15 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
 
     @Override
     public void onDestroy() {
+        cancel();
+        mBooksDBModel.closeDB();
+    }
+
+    /** Cancels every run and hides its progress in the same step, so no spinner stays stuck (SRCH-08). */
+    private void cancel() {
+        mInterrupted = (mSession != null && mSession.isRunning())
+                || (mGenreSession != null && mGenreSession.isRunning())
+                || (mChips != null && !mChips.isDisposed());
         if (mSession != null) {
             mSession.dispose();
         }
@@ -108,7 +119,18 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
         if (mChips != null) {
             mChips.dispose();
         }
-        mBooksDBModel.closeDB();
+        getViewState().showProgres(false);
+        getViewState().showProgresTop(false);
+    }
+
+    @Override
+    public void attachView(SearchableView view) {
+        super.attachView(view);
+        if (mInterrupted && query != null
+                && (mModelId == Consts.MODEL_BOOKS ? books.isEmpty() : genre == null || genre.isEmpty())) {
+            mInterrupted = false;
+            loadBoks();
+        }
     }
 
     @Override
@@ -217,6 +239,7 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
     public void retryFailed() {
         SearchSession<?> session = mModelId == Consts.MODEL_BOOKS ? mSession : mGenreSession;
         if (session != null && !session.isRunning() && session.failedCount() > 0) {
+            getViewState().setNotFoundVisibile(false);
             getViewState().showSourcesFailed(0);
             getViewState().showProgres(true);
             session.retryFailed();
@@ -301,7 +324,7 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
                 getViewState().showDataGenres(genre);
                 getViewState().showProgres(false);
                 getViewState().showSourcesFailed(failedSources);
-                getViewState().setNotFoundVisibile(genre.isEmpty() && failedSources == 0);
+                getViewState().setNotFoundVisibile(isNotFound(true, failedSources, genre.isEmpty()));
             }
         });
         getViewState().showProgres(true);
@@ -333,9 +356,15 @@ public class SearchbalePresenter extends MvpPresenter<SearchableView> implements
     }
 
     private void updateNotFound() {
-        boolean booksDone = mSession != null && !mSession.isRunning();
-        getViewState().setNotFoundVisibile(booksDone && isLoadAutors && books.isEmpty()
-                && mSearcheblPOJO.getAutorsList().isEmpty() && mSearcheblPOJO.getSeriesList().isEmpty());
+        boolean done = mSession != null && !mSession.isRunning() && isLoadAutors;
+        getViewState().setNotFoundVisibile(isNotFound(done, mSession == null ? 0 : mSession.failedCount(),
+                books.isEmpty() && mSearcheblPOJO.getAutorsList().isEmpty()
+                        && mSearcheblPOJO.getSeriesList().isEmpty()));
+    }
+
+    /** "Not found" only for a finished search that found nothing while every source answered. */
+    static boolean isNotFound(boolean finished, int failedSources, boolean nothingFound) {
+        return finished && failedSources == 0 && nothingFound;
     }
 
     @Override

@@ -27,15 +27,14 @@ import com.fanok.audiobooks.model.BooksModel;
 import com.fanok.audiobooks.model.GenreModel;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.search.ListingCursor;
 import com.fanok.audiobooks.search.ProviderPage;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.squareup.picasso.Picasso;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
-import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Objects;
 
 @InjectViewState
@@ -44,12 +43,12 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
     private boolean isLoading = false;
     private boolean isRefreshing = false;
-    private int page = 0;
     private final int mModelId;
     private final String mSubTitle;
     private ArrayList<BookPOJO> books;
     private ArrayList<GenrePOJO> genre;
-    private final HashSet<String> mSeen = new HashSet<>();
+    private final ListingCursor<BookPOJO> mBookCursor = new ListingCursor<>(b -> Url.canonical(b.getUrl()));
+    private final ListingCursor<GenrePOJO> mGenreCursor = new ListingCursor<>(GenrePOJO::getUrl);
     private final CompositeDisposable mDisposables = new CompositeDisposable();
     private com.fanok.audiobooks.interface_pacatge.books.BooksModel mModelBook;
     private com.fanok.audiobooks.interface_pacatge.books.GenreModel mModelGenre;
@@ -58,14 +57,12 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
 
     private final String mUrl;
-    private boolean isEnd;
 
     public BooksPresenter(@NonNull String url, int modelId, @NonNull String subTitle,
             @NonNull Context context) {
         mUrl = url;
         mModelId = modelId;
         mSubTitle = subTitle;
-        isEnd = false;
         mBooksDBModel = new BooksDBModel(context);
         switch (mModelId) {
             case Consts.MODEL_BOOKS:
@@ -92,8 +89,17 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
     @Override
     public void onDestroy() {
-        mDisposables.clear();
+        cancel();
         mBooksDBModel.closeDB();
+    }
+
+    /** Cancels the running load and resets the loading state with it, so no spinner or flag stays stuck. */
+    private void cancel() {
+        mDisposables.clear();
+        isLoading = false;
+        isRefreshing = false;
+        getViewState().showProgres(false);
+        getViewState().showRefreshing(false);
     }
 
     @Override
@@ -103,11 +109,23 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     }
 
     @Override
+    public void attachView(BooksView view) {
+        super.attachView(view);
+        // a listing whose load was cancelled before anything arrived starts again
+        if (!isLoading && !cursor().isEnd() && cursor().items().isEmpty()) {
+            loadBoks();
+        }
+    }
+
+    private ListingCursor<?> cursor() {
+        return mModelId == Consts.MODEL_BOOKS ? mBookCursor : mGenreCursor;
+    }
+
+    @Override
     public void loadBoks() {
-        if (!isEnd && !isLoading) {
+        if (!cursor().isEnd() && !isLoading) {
             getViewState().showProgres(true);
-            page++;
-            getData(pageUrl(page));
+            getData(cursor().nextPage());
         } else {
             getViewState().showRefreshing(false);
         }
@@ -654,49 +672,48 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     public void onRefresh() {
         if (!isLoading) {
             isRefreshing = true;
-            isEnd = false;
             getViewState().showRefreshing(true);
-            page = 1;
-            getData(pageUrl(page));
+            getData(1); // the cursor moves only when page 1 arrives
         } else {
             getViewState().showRefreshing(false);
         }
     }
 
 
-    private void getData(String url) {
+    private void getData(int page) {
         if (isLoading) {
             return;
         }
         isLoading = true;
+        String url = pageUrl(page);
         if (mModelId == Consts.MODEL_BOOKS) {
             mDisposables.add(mModelBook.getBooks(url, page, mSubTitle.trim(), mContext.getApplicationContext())
                     .subscribeOn(Schedulers.io())
                     .observeOn(AndroidSchedulers.mainThread())
-                    .subscribe(result -> onPage(result, books, mSeen, b -> Url.canonical(b.getUrl()),
-                                    () -> getViewState().showDataBooks(books)),
-                            e -> onPage(ProviderPage.<BookPOJO>failed(e), books, mSeen, b -> Url.canonical(b.getUrl()),
-                                    () -> getViewState().showDataBooks(books))));
+                    .subscribe(result -> onPage(page, result, mBookCursor, () -> {
+                                books = mBookCursor.items();
+                                getViewState().showDataBooks(books);
+                            }),
+                            e -> onPage(page, ProviderPage.<BookPOJO>failed(e), mBookCursor, null)));
         } else {
             mDisposables.add(mModelGenre.getBooks(url, page)
                     .subscribeOn(Schedulers.io())
                     .observeOn(AndroidSchedulers.mainThread())
-                    .subscribe(result -> onPage(result, genre, mSeen, GenrePOJO::getUrl,
-                                    () -> getViewState().showDataGenres(genre)),
-                            e -> onPage(ProviderPage.<GenrePOJO>failed(e), genre, mSeen, GenrePOJO::getUrl,
-                                    () -> getViewState().showDataGenres(genre))));
+                    .subscribe(result -> onPage(page, result, mGenreCursor, () -> {
+                                genre = mGenreCursor.items();
+                                getViewState().showDataGenres(genre);
+                            }),
+                            e -> onPage(page, ProviderPage.<GenrePOJO>failed(e), mGenreCursor, null)));
         }
     }
 
     /**
-     * Applies one page: a failure keeps the list and re-asks the same page next time; a refresh replaces
-     * the list; items already shown are not appended twice, and a page that brings nothing new ends the list.
+     * Applies one page: a failure (of a refresh too) keeps cursor and list and re-asks the same page next
+     * time; a success moves the cursor, page 1 replacing the list and its dedupe set ({@link ListingCursor}).
      */
-    private <T> void onPage(ProviderPage<T> result, ArrayList<T> list, HashSet<String> seen,
-            Function<T, String> key, Runnable show) {
+    private <T> void onPage(int page, ProviderPage<T> result, ListingCursor<T> cursor, Runnable show) {
         try {
             if (result.isFailure()) {
-                page--;
                 if (result.status == ProviderPage.Status.BLOCKED && mUrl.contains(Url.SERVER_BAZA_KNIG)) {
                     getViewState().showToast(R.string.cookes_baza_knig_exeption);
                 } else {
@@ -704,23 +721,7 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
                 }
                 return;
             }
-            if (isRefreshing) {
-                list.clear();
-                seen.clear();
-            }
-            int before = list.size();
-            for (T item : result.items) {
-                String k;
-                try {
-                    k = key.apply(item);
-                } catch (Exception e) {
-                    k = null;
-                }
-                if (k == null || seen.add(k)) {
-                    list.add(item);
-                }
-            }
-            isEnd = !result.hasMore || list.size() == before;
+            cursor.apply(page, result);
             show.run();
             if (isRefreshing) {
                 getViewState().setPosition(0);

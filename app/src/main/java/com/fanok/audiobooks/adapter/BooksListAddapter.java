@@ -10,9 +10,6 @@ import android.app.UiModeManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -39,11 +36,6 @@ import com.fanok.audiobooks.pojo.AudioListPOJO;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.util.DownloadUtil;
 import com.github.lzyzsd.circleprogress.DonutProgress;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.Proxy.Type;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -144,36 +136,15 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
 
             } else {
                 if (book.getPhoto() != null && !book.getPhoto().isEmpty()) {
-                    if(App.useProxy&&book.getPhoto().contains(Url.SERVER_BAZA_KNIG)){
-
-                        final Bitmap[] bmp = {null};
-                        Handler handler = new Handler(Looper.getMainLooper());
-                        executor.execute(() -> {
-
-                            try {
-                                URL url = new URL(book.getPhoto());
-                                Proxy proxy = new Proxy(Type.SOCKS, new InetSocketAddress(Consts.PROXY_HOST, Consts.PROXY_PORT));
-                                bmp[0] = BitmapFactory.decodeStream(url.openConnection(proxy).getInputStream());
-                            } catch (IOException ignored) {
-                            }
-                            handler.post(() -> {
-                                if(bmp[0] !=null) {
-                                    mImageView.setImageBitmap(bmp[0]);
-                                }
-                            });
-                        });
-
+                    String photoPath = book.getPhoto();
+                    if (photoPath.startsWith("content://")) {
+                        Glide.with(mImageView).load(android.net.Uri.parse(photoPath)).into(mImageView);
+                    } else if (photoPath.startsWith("/") || photoPath.contains(":\\")) {
+                        Glide.with(mImageView).load(new java.io.File(photoPath)).into(mImageView);
                     } else {
-                        String photoPath = book.getPhoto();
-                        if (photoPath.startsWith("content://")) {
-                            Glide.with(mImageView).load(android.net.Uri.parse(photoPath)).into(mImageView);
-                        } else if (photoPath.startsWith("/") || photoPath.contains(":\\")) {
-                            Glide.with(mImageView).load(new java.io.File(photoPath)).into(mImageView);
-                        } else {
-                            Glide.with(mImageView).load(photoPath).into(mImageView);
-                        }
+                        Glide.with(mImageView).load(photoPath).into(mImageView);
                     }
-                                        } else {
+                } else {
                     mImageView.setImageDrawable(
                             ContextCompat.getDrawable(mImageView.getContext(), android.R.drawable.ic_menu_gallery));
                 }
