@@ -29,7 +29,6 @@ import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PersistableBundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
@@ -106,7 +105,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     private static final String TAG = "BookActivity";
 
-    public static final String Broadcast_PLAY_NEW_AUDIO = "PlayNewAudio";
     public static final String Broadcast_SET_IMAGE = "SetImage";
     public static final String Broadcast_SET_PROGRESS = "SetProgress";
     public static final String Broadcast_SET_SELECTION = "SetSelection";
@@ -329,6 +327,19 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         } else {
             context.startActivity(intent);
         }
+    }
+
+    /**
+     * The player notification's content intent: the book screen from the saved book itself, no page fetch. Single
+     * top, so tapping it while this book's screen is on top only brings it forward.
+     */
+    @NonNull
+    public static Intent notificationIntent(@NonNull Context context, @NonNull BookPOJO bookPOJO) {
+        Intent intent = new Intent(context, BookActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.putExtra("notificationClick", true);
+        intent.putExtra(ARG_BOOK, new GsonBuilder().serializeNulls().create().toJson(bookPOJO));
+        return intent;
     }
 
     private static void refreshActivity(@NonNull Context context, @NonNull BookPOJO bookPOJO,
@@ -630,6 +641,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         });
 
         mAudioAdapter = new AudioAdapter();
+        mAudioAdapter.setBookUrl(mBookPOJO.getUrl());
         mAudioAdapter.setListener((view, position) -> mPresenter.onItemSelected(view, position));
         mList.setAdapter(mAudioAdapter);
         mLinearLayoutManager = new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false);
@@ -949,11 +961,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         unregisterReceiver(updateAdapter);
         unregisterReceiver(showEqualizer);
         showingView = "";
-        mPresenter.onDestroy();
-        if (!isChangingConfigurations()) {
-            //the presenter outlives a rotation (the player keeps its binding); release it for good otherwise
-            mPresenter.unbindPlayerService();
-        }
+        //Moxy destroys the presenter (and its player binding) when this screen is finished for good
         super.onDestroy();
     }
 
@@ -1153,19 +1161,6 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         mPlayBottom.setImageResource(id);
     }
 
-    @Override
-    public void onSaveInstanceState(@NotNull Bundle outState,
-            @NotNull PersistableBundle outPersistentState) {
-        super.onSaveInstanceState(outState, outPersistentState);
-        outState.putBoolean("serviceStatus", mPresenter.isServiceBound());
-    }
-
-    @Override
-    protected void onRestoreInstanceState(@NotNull Bundle savedInstanceState) {
-        super.onRestoreInstanceState(savedInstanceState);
-        mPresenter.setServiceBound(savedInstanceState.getBoolean("serviceStatus"));
-    }
-
     @UnstableApi
     @Override
     public void setSelected(int id, String name) {
@@ -1262,6 +1257,19 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         ViewParent parent = view.getParent();
         // TabLayout содержит дочерний SlidingTabIndicator, который в свою очередь содержит TabView
         return parent != null && parent.getParent() == tabs;
+    }
+
+    /** The notification of another book reached this single-top screen: open that book's own screen. */
+    @Override
+    protected void onNewIntent(@NonNull Intent intent) {
+        super.onNewIntent(intent);
+        String json = intent.getStringExtra(ARG_BOOK);
+        BookPOJO other = json != null ? BookPOJO.parceJsonToBookPojo(json) : null;
+        if (other != null && other.getUrl() != null && !other.getUrl().equals(mBookPOJO.getUrl())) {
+            Intent fresh = new Intent(intent);
+            fresh.setFlags(intent.getFlags() & ~(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK));
+            startActivity(fresh);
+        }
     }
 
     @UnstableApi

@@ -23,12 +23,14 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.MvpAppCompatActivity;
 import com.arellomobile.mvp.presenter.InjectPresenter;
+import com.fanok.audiobooks.Hourglass;
 import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.interface_pacatge.sleep_timer.SleepTimerView;
 import com.fanok.audiobooks.presenter.SleepTimerPresenter;
 import com.r0adkll.slidr.Slidr;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.Objects;
 
 public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTimerView {
@@ -36,10 +38,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
     public static final String bradcast_UpdateTimer = "updateTimer";
 
     public static final String bradcast_FinishTimer = "finishTimer";
-
-    public static final String Broadcast_SET_TIME_LEFT = "SetTimeLefft";
-
-    public static final String Broadcast_GET_TIME_LEFT = "GetTimeLefft";
 
     public static final String Broadcast_UPDATE_TIMER_START = "updateTimerStart";
 
@@ -55,8 +53,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
     private BroadcastReceiver updateTimerBroadcast;
 
     private BroadcastReceiver finihTimer;
-
-    private BroadcastReceiver setProgress;
 
 
     @Override
@@ -96,7 +92,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         super.onDestroy();
         unregisterReceiver(updateTimerBroadcast);
         unregisterReceiver(finihTimer);
-        unregisterReceiver(setProgress);
     }
 
     @Override
@@ -106,11 +101,12 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         int sec = Integer.parseInt(mSeconds.getText().toString());
         long time = (hours * 60L * 60L + min * 60L + sec) * 1000;
         intent.putExtra("time", time);
-        sendBroadcast(intent);
+        brodcastSend(intent);
     }
 
     @Override
     public void brodcastSend(final Intent intent) {
+        intent.setPackage(getPackageName());
         sendBroadcast(intent);
     }
 
@@ -178,48 +174,11 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
         updateTimerBroadcast = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                long milis = intent.getLongExtra("time", 0);
-                int seconds = (int) ((milis / 1000) % 60);
-                int minutes = (int) ((milis / (1000 * 60)) % 60);
-                int hours = (int) ((milis / (1000 * 60 * 60)) % 24);
-                String hoursString = String.valueOf(hours);
-                String minutesString = String.valueOf(minutes);
-                String secondString = String.valueOf(seconds);
-
-                ArrayList<Character> arrayList = new ArrayList<>();
-
-                if (hours > 0) {
-                    if (hoursString.length() == 1) arrayList.add(0, '0');
-                    for (int i = 0; i < hoursString.length(); i++) {
-                        arrayList.add(0, hoursString.charAt(i));
-                    }
-                } else {
-                    arrayList.add(0, '0');
-                    arrayList.add(0, '0');
-                }
-
-                if (minutes > 0) {
-                    if (minutesString.length() == 1) arrayList.add(0, '0');
-                    for (int i = 0; i < minutesString.length(); i++) {
-                        arrayList.add(0, minutesString.charAt(i));
-                    }
-                } else {
-                    arrayList.add(0, '0');
-                    arrayList.add(0, '0');
-                }
-
-                if (seconds > 0) {
-                    if (secondString.length() == 1) arrayList.add(0, '0');
-                    for (int i = 0; i < secondString.length(); i++) {
-                        arrayList.add(0, secondString.charAt(i));
-                    }
-                } else {
-                    arrayList.add(0, '0');
-                    arrayList.add(0, '0');
-                }
-
-                updateTime(arrayList);
-
+                //hours do not wrap at a day: up to 99 h can be entered
+                long[] hms = Hourglass.split(intent.getLongExtra("time", 0));
+                mHours.setText(String.format(Locale.ROOT, "%02d", hms[0]));
+                mMinutes.setText(String.format(Locale.ROOT, "%02d", hms[1]));
+                mSeconds.setText(String.format(Locale.ROOT, "%02d", hms[2]));
             }
         };
         IntentFilter updateTimerFilter = new IntentFilter(bradcast_UpdateTimer);
@@ -241,20 +200,6 @@ public class SleepTimerActivity extends MvpAppCompatActivity implements SleepTim
             registerReceiver(finihTimer, finishTimerFilter, RECEIVER_EXPORTED);
         }else{
             registerReceiver(finihTimer, finishTimerFilter);
-        }
-
-
-        setProgress = new BroadcastReceiver() {
-            @Override
-            public void onReceive(final Context context, final Intent intent) {
-                long time = intent.getLongExtra("timeLet", 0);
-                mPresenter.setEndCapterTime(time);
-            }
-        };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(setProgress, new IntentFilter(Broadcast_SET_TIME_LEFT), RECEIVER_EXPORTED);
-        }else {
-            registerReceiver(setProgress, new IntentFilter(Broadcast_SET_TIME_LEFT));
         }
     }
 
