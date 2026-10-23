@@ -52,6 +52,7 @@ import com.fanok.audiobooks.databinding.FragmentBooksBinding;
 import com.fanok.audiobooks.interface_pacatge.books.BooksView;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.presenter.BooksPresenter;
 import com.google.android.material.navigation.NavigationView;
 import java.util.ArrayList;
@@ -72,6 +73,8 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
     BooksPresenter mPresenter;
 
     private BooksListAddapter mAddapterBooks;
+    /** The parental-control version the visible covers were bound with. */
+    private long mParentalVersion;
 
     private GenreListAddapter mAddapterGenre;
 
@@ -533,6 +536,11 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
     @Override
     public void onResume() {
         super.onResume();
+        long parentalVersion = ParentalControl.version(requireContext());
+        if (parentalVersion != mParentalVersion && mAddapterBooks != null) {
+            mAddapterBooks.refreshItem();
+        }
+        mParentalVersion = parentalVersion;
         MainActivity activity = (MainActivity) getActivity();
         if (activity != null) {
             NavigationView navigationView = activity.getNavigationView();

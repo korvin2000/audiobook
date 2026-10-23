@@ -125,7 +125,6 @@ dependencies {
     annotationProcessor 'tech.schoolhelper:moxy-x-compiler:1.7.0'
     implementation 'tech.schoolhelper:moxy-x-material:1.7.0'
     implementation 'pub.devrel:easypermissions:3.0.0'
-    implementation 'com.github.mendhak:storage-chooser:2.0.4.4'
     implementation 'com.github.chrisbanes:PhotoView:2.3.0'
     implementation 'androidx.palette:palette:1.0.0'
     implementation 'com.github.bumptech.glide:glide:5.0.5'
@@ -140,8 +139,6 @@ dependencies {
     implementation 'com.diogobernardino:williamchart:2.2'
 
     implementation 'it.xabaras.android:recyclerview-swipedecorator:1.4'
-
-    implementation 'com.github.evgenyneu:js-evaluator-for-android:6.0.0'
 
     def room_version = "2.8.4"
     implementation "androidx.room:room-runtime:$room_version"

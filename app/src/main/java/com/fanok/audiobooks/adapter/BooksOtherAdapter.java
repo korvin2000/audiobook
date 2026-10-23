@@ -7,6 +7,7 @@ import static android.view.KeyEvent.KEYCODE_NUMPAD_ENTER;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -18,6 +19,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.activity.LoadBook;
 import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.squareup.picasso.Picasso;
 import java.util.ArrayList;
 
@@ -49,7 +51,10 @@ public class BooksOtherAdapter extends RecyclerView.Adapter<BooksOtherAdapter.Vi
     public void onBindViewHolder(@NonNull ViewHolder viewHolder, int i) {
         BookPOJO book = mData.get(i);
         Picasso.get().cancelRequest(viewHolder.mImageView);
-        if (book.getPhoto() != null && !book.getPhoto().isEmpty()) {
+        Drawable mask = ParentalControl.coverMask(viewHolder.mImageView.getContext(), book);
+        if (mask != null) {
+            viewHolder.mImageView.setImageDrawable(mask);
+        } else if (book.getPhoto() != null && !book.getPhoto().isEmpty()) {
             Picasso.get().load(book.getPhoto())
                     .placeholder(android.R.drawable.ic_menu_gallery)
                     .error(android.R.drawable.ic_menu_gallery)

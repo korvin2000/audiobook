@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.offline.DownloadIndex;
 import com.fanok.audiobooks.download.DownloadIds;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.DownloadItem;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.room.BooksAudioEntity;
 import com.fanok.audiobooks.util.DeletionPlanner;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
@@ -41,6 +42,7 @@ public class ClearSavedModel {
     }
 
     /** One book being assembled: its saved row or download data, and its downloads. */
+    @OptIn(markerClass = UnstableApi.class)
     private static final class Group {
         String bookUrl;
         BookPOJO book;
@@ -179,9 +181,12 @@ public class ClearSavedModel {
                 : Download.STATE_COMPLETED;
         int progress = total > 0 ? Math.max(0, Math.min(100, Math.round(100f * (completed + partial) / total))) : 0;
         BookPOJO book = g.book;
+        // a blocked book's cover is not handed to the Downloads screen (the placeholder shows instead)
+        String cover = book != null && ParentalControl.isAllowed(mContext, book) ? book.getPhoto() : null;
         String source = DeletionPlanner.isImportedBook(g.bookUrl) ? "Локально" : DownloadStorageHelper.getSourceName(g.bookUrl);
         return new DownloadItem(DownloadIds.bookKey(g.bookUrl), g.bookUrl,
-                book != null ? book.getPhoto() : null, book != null ? book.getName() : nameOf(rows),
+                cover, book != null ? book.getName() : nameOf(rows),
+
                 book != null ? book.getAutor() : null, book != null ? book.getArtist() : null, source,
                 status, progress, completed, selected, total, new ArrayList<>(g.downloads.keySet()), exported);
     }

@@ -33,9 +33,6 @@
 -keep class * extends com.bumptech.glide.module.AppGlideModule
 -keep class com.bumptech.glide.GeneratedAppGlideModuleImpl { *; }
 
-# js-evaluator (WebView JavaScript bridge, uses reflection)
--keep class com.evgenii.jsevaluator.** { *; }
-
 # Release builds drop debug/verbose logging (search queries, URLs).
 -assumenosideeffects class android.util.Log {
     public static *** d(...);

@@ -88,30 +88,9 @@
         <activity
             android:name=".activity.ActivityCookies"
             android:configChanges="locale|uiMode"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/baza_knig"
-            android:theme="@style/AppTheme.SwipeOnClose">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="izibuk.ru"
-                    android:scheme="https" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:host="pda.izibuk.ru"
-                    android:scheme="https" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/AppTheme.SwipeOnClose" />
         <activity
             android:name=".activity.SleepTimerActivity"
             android:configChanges="locale|uiMode"
@@ -167,6 +146,11 @@
             android:theme="@style/AppTheme.SwipeOnClose">
             <intent-filter>
                 <action android:name="android.intent.action.SEARCH" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
 
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>

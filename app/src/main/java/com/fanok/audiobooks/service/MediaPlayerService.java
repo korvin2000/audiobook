@@ -28,6 +28,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.SearchManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -86,6 +87,7 @@ import com.fanok.audiobooks.Hourglass;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.activity.BookActivity;
 import com.fanok.audiobooks.activity.LoadBook;
+import com.fanok.audiobooks.activity.SearchableActivity;
 import com.fanok.audiobooks.android_equalizer.EqualizerModel;
 import com.fanok.audiobooks.android_equalizer.Settings;
 import com.fanok.audiobooks.broadcasts.OnCancelBroadcastReceiver;
@@ -165,6 +167,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             | PlaybackStateCompat.ACTION_REWIND
             | PlaybackStateCompat.ACTION_FAST_FORWARD
             | PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID
+            | PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
             | PlaybackStateCompat.ACTION_STOP;
 
     // Published for in-process readers; written on the main thread only.
@@ -1555,6 +1558,20 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             @Override
             public void onPlayFromMediaId(final String mediaId, final Bundle extras) {
                 playFromMediaId(mediaId);
+            }
+
+            /** An empty query ("play an audiobook") resumes the last book; anything else opens the search. */
+            @Override
+            public void onPlayFromSearch(final String query, final Bundle extras) {
+                if (query == null || query.trim().isEmpty()) {
+                    play();
+                    return;
+                }
+                Intent search = new Intent(MediaPlayerService.this, SearchableActivity.class)
+                        .setAction(Intent.ACTION_SEARCH)
+                        .putExtra(SearchManager.QUERY, query)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(search);
             }
         });
         setSessionToken(mediaSession.getSessionToken());

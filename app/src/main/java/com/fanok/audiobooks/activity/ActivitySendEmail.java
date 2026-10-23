@@ -1,7 +1,6 @@
 package com.fanok.audiobooks.activity;
 
 import android.content.ActivityNotFoundException;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Resources;
@@ -15,7 +14,6 @@ import androidx.appcompat.app.ActionBar;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.MvpAppCompatActivity;
 import com.fanok.audiobooks.Consts;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.databinding.ActivitySendEmailBinding;
 import com.r0adkll.slidr.Slidr;
@@ -145,11 +143,5 @@ public class ActivitySendEmail extends MvpAppCompatActivity {
                 Toast.makeText(this, getString(R.string.error_send_mail), Toast.LENGTH_SHORT).show();
             }
         }
-    }
-
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
     }
 }

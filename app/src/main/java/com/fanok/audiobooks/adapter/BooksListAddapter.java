@@ -17,6 +17,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
@@ -128,8 +129,10 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                 throw new NullPointerException();
             }
 
-            if (!com.fanok.audiobooks.policy.ParentalControl.isAllowed(mImageView.getContext(), book)) {
-                Glide.with(mImageView).load(R.drawable.ic_parental_control).into(mImageView);
+            android.graphics.drawable.Drawable mask =
+                    com.fanok.audiobooks.policy.ParentalControl.coverMask(mImageView.getContext(), book);
+            if (mask != null) {
+                Glide.with(mImageView).load(mask).into(mImageView);
 
             } else {
                 if (book.getPhoto() != null && !book.getPhoto().isEmpty()) {
@@ -368,6 +371,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
         notifyDataSetChanged();
     }
 
+    @OptIn(markerClass = UnstableApi.class)
     private void preloadStatuses(ArrayList<BookPOJO> newModel) {
         if (newModel == null || newModel.isEmpty()) {
             progressCache.clear();

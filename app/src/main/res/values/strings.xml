@@ -384,7 +384,6 @@
     <string name="knigoblud_today">Слушают сегодня</string>
     <string name="knigoblud_trending">В тренде</string>
     <string name="knigoblud_finished">Дослушивают до конца</string>
-    <string name="error_decode">Не удалось расшифровать данные</string>
     <string name="use_vpn">Использовать VPN</string>
     <string name="antizapret">Антизапрет (Россия)</string>
     <string name="zaborona">Заборона (Украина)</string>
@@ -445,7 +444,6 @@
     <string name="no_other_readers">Других чтецов нет</string>
     <string name="no_other_sources">Других источников нет</string>
     <string name="notification_permission_rationale">Разрешение на уведомления нужно, чтобы показывать плеер и ход загрузок в шторке</string>
-    <string name="manage_storage_rationale">Чтобы указать папку вручную, приложению нужен доступ ко всем файлам. Папку из проводника можно выбрать и без него</string>
     <string name="pin_locked">Слишком много попыток. Повторите через %1$d с</string>
     <string name="parental_control_sources_failed">Не удалось загрузить жанры: %1$s. Книги этих источников остаются заблокированы</string>
     <string name="equalizer_unavailable">Эквалайзер недоступен на этом устройстве</string>

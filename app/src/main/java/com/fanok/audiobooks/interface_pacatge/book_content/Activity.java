@@ -33,9 +33,6 @@ public interface Activity extends MvpView {
 
     void showTitle(@NonNull String name);
 
-    @StateStrategyType(SkipStrategy.class)
-    void decode(@NonNull String key);
-
     @StateStrategyType(AddToEndSingleStrategy.class)
     void updateTime(int timeCurent, int timeEnd, int buffered);
 

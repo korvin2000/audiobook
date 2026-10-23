@@ -4,6 +4,7 @@ package com.fanok.audiobooks.model;
 import androidx.annotation.NonNull;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.net.SiteHttp;
+import com.fanok.audiobooks.pojo.GenrePOJO;
 import com.fanok.audiobooks.pojo.ParentControlPOJO;
 import io.reactivex.Observable;
 import java.io.IOException;
@@ -38,6 +39,9 @@ public class ParentalControlModel {
             load(loaded, "audiobook-mp3.com", this::loadBooksListABMP3);
             load(loaded, "База Книг", this::loadBooksListBazaKnig);
             load(loaded, "Книгоблуд", this::loadBooksListKnigablud);
+            load(loaded, "Audioboo", () -> loadGenres("Audioboo", Url.INDEX_AUDIOBOO));
+            load(loaded, "Отрубин", () -> loadGenres("Отрубин", Url.SECTIONS_OTRUB));
+            load(loaded, "Полекниг", () -> loadGenres("Полекниг", Url.SECTIONS_POLEKNIG));
             return loaded;
         });
     }
@@ -54,6 +58,18 @@ public class ParentalControlModel {
             android.util.Log.w("ParentalControlModel", "Categories of " + source + " not loaded", e);
             loaded.failedSources.add(source);
         }
+    }
+
+    /** The categories of a source through the genre-screen loader {@link GenreModel} already has for it. */
+    private static ArrayList<ParentControlPOJO> loadGenres(@NonNull String source, @NonNull String sectionsUrl)
+            throws IOException {
+        ArrayList<ParentControlPOJO> result = new ArrayList<>();
+        for (GenrePOJO genre : new GenreModel().load(sectionsUrl, 1).items) {
+            if (genre.getUrl() != null && genre.getName() != null) {
+                result.add(new ParentControlPOJO(source, genre.getName(), genre.getUrl()));
+            }
+        }
+        return result;
     }
 
     ArrayList<ParentControlPOJO> loadBooksList() throws IOException {

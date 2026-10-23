@@ -20,7 +20,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.SearchRecentSuggestions;
-import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
 import android.widget.TextView;
@@ -188,20 +187,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     .commit();
         }
     }
-
-
-    private final ActivityResultLauncher<Intent> manageStorageLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    if (Environment.isExternalStorageManager()) {
-                        showAllert(requireContext(), R.string.confirm_restore, restoreClickListnere);
-                    } else {
-                        Toast.makeText(requireContext(), getString(R.string.worning_not_allowed_read_storege),
-                                Toast.LENGTH_SHORT).show();
-                    }
-                }
-            });
 
 
     @Override
@@ -454,20 +439,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         Context context = getContext();
         if (context == null) return;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            // say why before sending the user to system settings (UI-18)
-            new AlertDialog.Builder(context)
-                    .setTitle(R.string.select_folder)
-                    .setMessage(R.string.manage_storage_rationale)
-                    .setPositiveButton(R.string.continue_, (d, w) -> requestAllFilesAccess())
-                    .setNegativeButton(R.string.cancel, (d, w) -> {
-                        if (!DownloadStorageHelper.openFolderPicker(folderPickerLauncher)) {
-                            showFallbackFolderSelectionDialog(context);
-                        }
-                    })
-                    .show();
-            return;
-        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 101);
@@ -493,21 +465,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             }
         });
         builder.show();
-    }
-
-    private void requestAllFilesAccess() {
-        try {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-            intent.addCategory("android.intent.category.DEFAULT");
-            intent.setData(Uri.parse(String.format("package:%s", requireContext().getPackageName())));
-            manageStoragePermissionOnlyLauncher.launch(intent);
-        } catch (Exception e) {
-            try {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                manageStoragePermissionOnlyLauncher.launch(intent);
-            } catch (Exception ignored) {
-            }
-        }
     }
 
     private void showFallbackFolderSelectionDialog(Context context) {
@@ -587,10 +544,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     e.printStackTrace();
                 }
             });
-
-    private final ActivityResultLauncher<Intent> manageStoragePermissionOnlyLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> DownloadStorageHelper.openFolderPicker(folderPickerLauncher));
 
     @Override
     public void onPermissionsGranted(int requestCode, @NonNull List<String> perms) {

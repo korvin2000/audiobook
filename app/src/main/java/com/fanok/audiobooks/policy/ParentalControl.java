@@ -2,8 +2,11 @@ package com.fanok.audiobooks.policy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Drawable;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
+import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +18,8 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * The one parental-control decision: a book is allowed when the control is off, or when its source + category id
@@ -34,6 +39,7 @@ public final class ParentalControl {
     static final String PIN_FAILURES = "pin_failures";
     static final String PIN_LOCK_UNTIL = "pin_lock_until";
     static final String PIN_LOCK_SECONDS = "pin_lock_seconds";
+    static final String VERSION = "parental_version";
 
     static final int FAILURES_BEFORE_LOCK = 5;
     static final long FIRST_LOCK_MS = 30_000L;
@@ -98,10 +104,16 @@ public final class ParentalControl {
         return id != null && allowedIds(store).contains(id);
     }
 
-    /** The allow-list as normalised ids; legacy entries keyed by a raw genre URL are migrated on the way. */
+    /**
+     * The allow-list as normalised ids. Legacy entries keyed by a raw genre URL are migrated on the way; when several
+     * entries (legacy aliases or the canonical one) name the same id, any {@code false} among them wins, so a
+     * migration can never turn a blocked category into an allowed one. The migration is written in sorted order.
+     */
     @NonNull
     public static Set<String> allowedIds(@NonNull Store store) {
-        Set<String> ids = new HashSet<>();
+        Map<String, Boolean> resolved = new TreeMap<>();
+        Map<String, Boolean> migrated = new TreeMap<>();
+        Set<String> legacyKeys = new TreeSet<>();
         for (Map.Entry<String, ?> entry : store.all().entrySet()) {
             String key = entry.getKey();
             if (!(entry.getValue() instanceof Boolean) || ENABLED.equals(key)) {
@@ -109,17 +121,26 @@ public final class ParentalControl {
             }
             boolean allowed = (Boolean) entry.getValue();
             if (key.startsWith("http://") || key.startsWith("https://")) {
-                store.remove(key);
-                String id = categoryId(key, key);
-                if (id != null) {
-                    store.putBoolean(id, allowed);
-                    key = id;
-                } else {
+                legacyKeys.add(key);
+                key = categoryId(key, key);
+                if (key == null) {
                     continue;
                 }
+                migrated.put(key, true);
             }
-            if (allowed) {
-                ids.add(key);
+            Boolean previous = resolved.get(key);
+            resolved.put(key, allowed && (previous == null || previous));
+        }
+        for (String key : legacyKeys) {
+            store.remove(key);
+        }
+        for (String id : migrated.keySet()) {
+            store.putBoolean(id, resolved.get(id));
+        }
+        Set<String> ids = new HashSet<>();
+        for (Map.Entry<String, Boolean> entry : resolved.entrySet()) {
+            if (entry.getValue()) {
+                ids.add(entry.getKey());
             }
         }
         return ids;
@@ -132,9 +153,36 @@ public final class ParentalControl {
 
     public static void setCategoryAllowed(@NonNull Store store, @Nullable String categoryUrl, boolean allowed) {
         String id = categoryId(categoryUrl, categoryUrl);
-        if (id != null) {
+        if (id != null && !Boolean.valueOf(allowed).equals(store.all().get(id))) {
             store.putBoolean(id, allowed);
+            bumpVersion(store);
         }
+    }
+
+    public static void setEnabled(@NonNull Store store, boolean enabled) {
+        if (isEnabled(store) != enabled) {
+            store.putBoolean(ENABLED, enabled);
+            bumpVersion(store);
+        }
+    }
+
+    /** Grows on every change of the switch or the allow-list, so screens can tell their covers are stale. */
+    public static long version(@NonNull Context context) {
+        return version(store(context));
+    }
+
+    public static long version(@NonNull Store store) {
+        return asLong(store.all().get(VERSION));
+    }
+
+    private static void bumpVersion(@NonNull Store store) {
+        store.putString(VERSION, String.valueOf(version(store) + 1));
+    }
+
+    /** The mask to show instead of {@code book}'s cover, or null when the cover may be shown. */
+    @Nullable
+    public static Drawable coverMask(@NonNull Context context, @Nullable BookPOJO book) {
+        return isAllowed(context, book) ? null : ContextCompat.getDrawable(context, R.drawable.ic_parental_control);
     }
 
     /**

@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.InjectViewState;
@@ -31,8 +32,9 @@ import java.util.concurrent.Callable;
 import org.jetbrains.annotations.NotNull;
 
 @InjectViewState
-@UnstableApi
-public class FavoritePresenter extends MvpPresenter<FavoriteView> implements
+@OptIn(markerClass = UnstableApi.class)
+public class FavoritePresenter
+ extends MvpPresenter<FavoriteView> implements
         com.fanok.audiobooks.interface_pacatge.favorite.FavoritePresenter {
 
     public static final int NOT_SAVED = FavoriteModel.NOT_SAVED;
