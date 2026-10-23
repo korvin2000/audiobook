@@ -127,10 +127,16 @@ public class DownloadUtil {
         return Collections.emptyMap();
     }
 
-    /** Network source for every request of one download or playback of {@code bookUrl}. */
+    /** Network source for every request of one playback of {@code bookUrl}. */
     @NonNull
     public static DataSource.Factory upstreamFor(@NonNull Context context, @Nullable String bookUrl) {
-        okhttp3.OkHttpClient client = App.getOkHttpClient();
+        return upstreamFor(context, bookUrl, App.getOkHttpClient());
+    }
+
+    /** Network source for every request of one download or playback of {@code bookUrl} through {@code client}. */
+    @NonNull
+    static DataSource.Factory upstreamFor(@NonNull Context context, @Nullable String bookUrl,
+                                          @NonNull okhttp3.OkHttpClient client) {
         Map<String, String> cookies = requestCookies(bookUrl);
         if (!cookies.isEmpty()) {
             client = client.newBuilder().cookieJar(App.getCookieJar().with(Url.SERVER_BAZA_KNIG, cookies)).build();
@@ -142,13 +148,17 @@ public class DownloadUtil {
                 dataSpec -> dataSpec.withUri(withoutLegacyRef(dataSpec.uri)));
     }
 
-    /** Downloader per request: each download fetches through its own book's context. */
+    /**
+     * Downloader per request: each download fetches through its own book's context, on the HTTP/1.1 client so that
+     * parallel segment requests get a connection each ({@link App#getDownloadHttpClient}).
+     */
     @NonNull
     public static DownloaderFactory downloaderFactory(@NonNull Context context, @NonNull Cache cache,
                                                       @NonNull Executor executor) {
         final Context app = context.getApplicationContext();
         return request -> new DefaultDownloaderFactory(
-                new CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstreamFor(app, bookUrlOf(request))),
+                new CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(
+                        upstreamFor(app, bookUrlOf(request), App.getDownloadHttpClient())),
                 executor).createDownloader(request);
     }
 

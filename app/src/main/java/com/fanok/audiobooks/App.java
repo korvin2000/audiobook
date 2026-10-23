@@ -141,6 +141,25 @@ public class App extends Application {
         return okHttpClientInstance;
     }
 
+    private static volatile okhttp3.OkHttpClient downloadHttpClient;
+
+    /**
+     * The client of downloads: the shared one (connection pool, cookies, headers, proxy) restricted to HTTP/1.1.
+     * akniga's CDN limits every connection to about 300 KB/s, and HTTP/2 puts all parallel segment requests of a
+     * download on one connection; one connection per request makes a book download about three times faster.
+     * Playback, pages and covers keep the shared client.
+     */
+    public static okhttp3.OkHttpClient getDownloadHttpClient() {
+        okhttp3.OkHttpClient client = downloadHttpClient;
+        if (client == null && okHttpClientInstance != null) {
+            client = okHttpClientInstance.newBuilder()
+                    .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
+                    .build();
+            downloadHttpClient = client;
+        }
+        return client;
+    }
+
     public static okhttp3.OkHttpClient okHttpClientInstance;
 
     /** Cookies of the shared client: response cookies are resent to their host for the process lifetime. */
@@ -333,15 +352,125 @@ public class App extends Application {
         if (downloadManager != null) return;
         File dir = downloadStoreDir();
         SimpleCache cache = new SimpleCache(dir, new NoOpCacheEvictor(), getDatabaseProvider());
-        ExecutorService executor = Executors.newFixedThreadPool(3);
+        ExecutorService executor = Executors.newFixedThreadPool(DOWNLOAD_THREADS);
         DownloadManager dm = new DownloadManager(this, new DefaultDownloadIndex(getDatabaseProvider()),
                 DownloadUtil.downloaderFactory(this, cache, executor));
         dm.setMaxParallelDownloads(1);
         dm.setRequirements(new Requirements(Requirements.NETWORK));
+        followNetworkForDownloads(dm);
         downloadCacheDir = dir;
         downloadExecutor = executor;
         downloadCache = cache;
         downloadManager = dm;
+    }
+
+    /** Parallel segment requests of one HLS download, each on its own connection (see {@link #getDownloadHttpClient}). */
+    private static final int DOWNLOAD_THREADS = 4;
+
+    /**
+     * Media3's NETWORK requirement also wants Android to have validated the network (reached Google's connectivity
+     * check). Where that check fails while the internet works, every download stayed queued behind a spinner. The
+     * requirement follows the default network instead: none while it has internet access (a captive portal excepted),
+     * NETWORK while there is none, so downloads still wait offline and go on when a network returns. The manager is
+     * only touched on the main thread, where it was created.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private void followNetworkForDownloads(@androidx.annotation.NonNull DownloadManager dm) {
+        android.net.ConnectivityManager connectivity =
+                (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (connectivity == null) {
+            return;
+        }
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        try {
+            //callbacks come on a connectivity thread; every decision and its state live on the main thread
+            connectivity.registerDefaultNetworkCallback(new android.net.ConnectivityManager.NetworkCallback() {
+                /** The default network the last decision was about; a late loss of an older one is ignored. */
+                private android.net.Network current;
+                /** Whether that network was validated; null before the first decision. */
+                private Boolean validated;
+
+                @Override
+                public void onAvailable(@androidx.annotation.NonNull android.net.Network network) {
+                    android.net.NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+                    main.post(() -> decide(network, caps));
+                    if (caps == null) {
+                        //the lookup can race the callback (API 24-25 send no capabilities right after it)
+                        main.postDelayed(() -> {
+                            if (network.equals(current)) {
+                                decide(network, connectivity.getNetworkCapabilities(network));
+                            }
+                        }, 1_000);
+                    }
+                }
+
+                @Override
+                public void onCapabilitiesChanged(@androidx.annotation.NonNull android.net.Network network,
+                                                  @androidx.annotation.NonNull android.net.NetworkCapabilities caps) {
+                    main.post(() -> decide(network, caps));
+                }
+
+                @Override
+                public void onLost(@androidx.annotation.NonNull android.net.Network network) {
+                    main.post(() -> {
+                        if (network.equals(current)) {
+                            decide(null, null);
+                        }
+                    });
+                }
+
+                private void decide(@androidx.annotation.Nullable android.net.Network network,
+                                    @androidx.annotation.Nullable android.net.NetworkCapabilities caps) {
+                    current = network;
+                    boolean run = caps != null && downloadsMayRun(
+                            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL));
+                    boolean nowValidated = caps != null
+                            && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+                    boolean internetBack = Boolean.FALSE.equals(validated) && nowValidated;
+                    validated = nowValidated;
+                    dm.setRequirements(new Requirements(run ? 0 : Requirements.NETWORK));
+                    if (internetBack) {
+                        retryFailedDownloads(dm, main);
+                    }
+                }
+            });
+        } catch (RuntimeException e) {
+            //no permission or too many callbacks: downloads keep Media3's validated-network requirement
+            android.util.Log.w("App", "downloads cannot follow the network", e);
+        }
+    }
+
+    /**
+     * The internet came back (the network is validated again): downloads that ran out of retries meanwhile, on a
+     * network that was up but could not reach anything, are queued again and keep the bytes already in the cache.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private static void retryFailedDownloads(@androidx.annotation.NonNull DownloadManager dm,
+                                             @androidx.annotation.NonNull android.os.Handler main) {
+        DownloadUtil.runInBackground(() -> {
+            java.util.List<androidx.media3.exoplayer.offline.DownloadRequest> failed = new java.util.ArrayList<>();
+            try (androidx.media3.exoplayer.offline.DownloadCursor cursor =
+                         dm.getDownloadIndex().getDownloads(androidx.media3.exoplayer.offline.Download.STATE_FAILED)) {
+                while (cursor.moveToNext()) {
+                    failed.add(cursor.getDownload().request);
+                }
+            } catch (IOException e) {
+                android.util.Log.w("App", "failed downloads not read", e);
+            }
+            if (!failed.isEmpty()) {
+                main.post(() -> {
+                    for (androidx.media3.exoplayer.offline.DownloadRequest request : failed) {
+                        dm.addDownload(request);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Whether downloads may run on the default network: internet access that is not a captive portal's. */
+    static boolean downloadsMayRun(boolean internet, boolean captivePortal) {
+        return internet && !captivePortal;
     }
 
     /**

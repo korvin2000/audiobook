@@ -176,6 +176,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     /** A transient audio focus loss longer than this, outside a call, is taken as a pause. */
     private static final long FOCUS_LOSS_LIMIT_MS = 30 * 60_000L;
     private static final long FOCUS_LOSS_RECHECK_MS = 60_000;
+    /** Waiting for data longer than this, while it should play, is shown as a stall, not as silent playback. */
+    private static final long STALL_NOTICE_MS = 3_000;
 
     private static final long SESSION_ACTIONS = PlaybackStateCompat.ACTION_PLAY
             | PlaybackStateCompat.ACTION_PAUSE
@@ -286,6 +288,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private ConnectivityManager.NetworkCallback networkCallback;
     /** The player gave up while playing: Next and Previous play the chapter they load. Any other command clears it. */
     private boolean resumeOnSkip;
+    /** A stall notice is shown (chapter title, notification), or due after {@link #STALL_NOTICE_MS}. */
+    private boolean stallShown;
+    private boolean stallPending;
+    private final Runnable stallNotice = this::onStallNotice;
     /** elapsedRealtime when a transient audio focus loss silenced the player, -1 while it is not silenced. */
     private long suppressedSince = -1;
     /** elapsedRealtime of the pause, 0 for "long ago" (a freshly loaded book), -1 while not paused. */
@@ -1504,8 +1510,47 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             shownIcon = icon;
             sendPlayIcon();
         }
+        updateStallNotice();
         handler.removeCallbacks(notifyTask);
         handler.post(notifyTask);
+    }
+
+    /** Waiting for data while it should play: a moment at a chapter start or a seek, or a network stall. */
+    private boolean isStalled() {
+        return hasBook() && player != null && wantPlaying && !isShowingError() && !isFocusSuppressed()
+                && (isWaiting() || player.getPlaybackState() == Player.STATE_BUFFERING);
+    }
+
+    /**
+     * A wait longer than {@link #STALL_NOTICE_MS} is shown in the chapter title and the notification, so a network
+     * stall does not look like playback without sound; it goes away when the audio plays again.
+     */
+    private void updateStallNotice() {
+        if (isStalled()) {
+            if (!stallShown && !stallPending) {
+                stallPending = true;
+                handler.postDelayed(stallNotice, STALL_NOTICE_MS);
+            }
+            return;
+        }
+        handler.removeCallbacks(stallNotice);
+        stallPending = false;
+        if (stallShown) {
+            stallShown = false;
+            sendChapterToUi();
+            publishMetadata();
+        }
+    }
+
+    private void onStallNotice() {
+        stallPending = false;
+        if (!stallShown && isStalled()) {
+            stallShown = true;
+            sendChapterToUi();
+            publishMetadata();
+            handler.removeCallbacks(notifyTask);
+            handler.post(notifyTask);
+        }
     }
 
     private boolean isWaiting() {
@@ -1572,10 +1617,14 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             return;
         }
         AudioPOJO audio = chapters.get(chapterIndex);
+        //Android 13+ media controls show the session's title, not the notification text: the stall goes there too
+        String title = stallShown
+                ? getString(R.string.playback_stalled_title, audio.getName() != null ? audio.getName() : "")
+                : audio.getName();
         MediaMetadataCompat.Builder metadata = new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, Integer.toString(chapterIndex))
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, audio.getName())
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, audio.getName())
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, bookName())
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, bookName())
                 .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, chapterIndex + 1)
@@ -1631,7 +1680,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
         String name = chapters.get(chapterIndex).getName();
         sendInternal(new Intent(Broadcast_SET_SELECTION).putExtra("postion", chapterIndex).putExtra("name", name));
-        sendInternal(new Intent(Broadcast_SET_TITLE).putExtra("title", name));
+        String title = stallShown ? getString(R.string.playback_stalled_title, name != null ? name : "") : name;
+        sendInternal(new Intent(Broadcast_SET_TITLE).putExtra("title", title));
     }
 
     private void startProgress() {
@@ -1719,7 +1769,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
         boolean showPause = showsPause();
         builder.setContentTitle(chapters.get(chapterIndex).getName())
-                .setContentText(isShowingError() ? getString(errorMessage()) : bookName())
+                .setContentText(isShowingError() ? getString(errorMessage())
+                        : stallShown ? getString(R.string.playback_stalled) : bookName())
                 .setLargeIcon(image)
                 .setOngoing(wantPlaying)
                 .setContentIntent(contentIntent)

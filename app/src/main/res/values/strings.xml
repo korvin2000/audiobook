@@ -405,6 +405,8 @@
     <string name="sleep_timer_started">Таймер сна запущен, обратній отчет пойдет после того как книга будет снята с паузы</string>
     <string name="sleep_timer_no_playback">Сначала откройте книгу: таймер сна работает с плеером</string>
     <string name="playback_error_retry">Не удалось загрузить главу. Нажмите «Воспроизвести», чтобы повторить</string>
+    <string name="playback_stalled">Нет данных от сети. Воспроизведение продолжится само</string>
+    <string name="playback_stalled_title">Загрузка… %1$s</string>
     <string name="playback_error_skip">Эту главу не удаётся воспроизвести. Нажмите «Следующий», чтобы пропустить её</string>
     <string name="playback_rewind_30">Назад на 30 секунд</string>
     <string name="multithreading">Многопоточность</string>
