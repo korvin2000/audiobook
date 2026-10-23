@@ -38,6 +38,14 @@ public class Consts {
     public static final Pattern REGEXP_EMAIL = Pattern.compile(
             "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6}$", Pattern.CASE_INSENSITIVE);
 
+    // Built-in SOCKS proxy behind the Settings switch "Прокси", applied process-wide by net/AppProxy, which hands
+    // these credentials only to this host:port. They are deliberately disposable, dedicated to this app (owner's
+    // decision, 2026-10-23). Restored from commit 2f0a631; an empty host makes the switch inert.
+    public static final String PROXY_HOST = "23.247.247.115";
+    public static final int PROXY_PORT = 15441;
+    public static final String PROXY_USER = "user142424";
+    public static final String PROXY_PASSWORD = "3yuh5e";
+
     public static final String USER_AGENT
             = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36";
 

@@ -12,7 +12,7 @@ import org.jsoup.nodes.Document;
 /** Book-page fixtures under {@code src/test/resources/fixtures/<source>/} and the page URL each was captured from. */
 public final class BookPageFixtures {
 
-    /** {fixture path, book URL}; audioboo's page is synthetic (the live site only serves a challenge). */
+    /** {fixture path, book URL}; audioboo's page was POSTed (the live site challenges every GET). */
     public static final String[][] BOOK_PAGES = {
             {"knigavuhe/book-description.html", "https://knigavuhe.org/book/uzhasy-po-chasam/"},
             {"izibuk/book-description.html", "https://izib.uk/art144181"},
@@ -21,7 +21,7 @@ public final class BookPageFixtures {
             {"bazaknig/book-description.html",
                     "https://baza-knig.top/roman-proza/182526-objali-menja-vody-do-dushi-moej-kjendzaburo-oje.html"},
             {"knigoblud/book-description.html", "https://www.knigoblud.club/099fb474-923c-4a06-8c01-a3f831109467"},
-            {"audioboo/book-description.html", "https://audioboo.org/detektivy/1000-tihiy-dom.html"},
+            {"audioboo/book-description.html", "https://audioboo.org/fantastika/123139-mahanenko-vasilij-solo-06.html"},
             {"otrub/book-description.html", "https://otrub.in/volnyjj-lekar-student-tom-7.html"},
             {"poleknig/book-description.html", "https://poleknig.com/books/269329"},
     };

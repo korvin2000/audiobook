@@ -265,15 +265,12 @@ public class ComentsModel implements
         if (list == null) {
             return new Parsed();
         }
-        return nest(list.children(), null, (comment, pojo) -> {
-            Element head = comment.selectFirst(".comm-one");
-            if (head != null && head.childrenSize() > 0) {
-                pojo.setName(head.child(0).text());
-            }
-            if (head != null && head.childrenSize() > 1) {
-                pojo.setDate(head.child(1).text());
-            }
-            pojo.setText(text(comment, ".comm-two"));
+        //a reply sits inside the block of the comment it answers
+        String block = "div[id^=comment-id-]";
+        return nest(list.select(block), block, (comment, pojo) -> {
+            pojo.setName(text(comment, ".comment-item__author"));
+            pojo.setDate(text(comment, ".comment-item__date"));
+            pojo.setText(text(comment, ".comment-item__main"));
         });
     }
 

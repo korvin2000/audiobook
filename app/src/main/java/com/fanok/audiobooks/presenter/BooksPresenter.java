@@ -18,6 +18,7 @@ import androidx.fragment.app.Fragment;
 import com.arellomobile.mvp.InjectViewState;
 import com.arellomobile.mvp.MvpPresenter;
 import com.fanok.audiobooks.Consts;
+import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.fragment.BooksFragment;
@@ -138,13 +139,15 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
         if (mModelId == Consts.MODEL_GENRE) {
             return mUrl;
         }
-        if (mUrl.contains(Url.SERVER_KNIGOBLUD)) {
+        if (Url.isHost(mUrl, Url.SERVER_AUDIOBOO)) {
+            //the index, genres and the author, reader and series links of cards share one scheme
+            return Url.audiobooListingPage(mUrl, page);
+        } else if (mUrl.contains(Url.SERVER_KNIGOBLUD)) {
             return mUrl.contains("?") ? mUrl + page : mUrl + "/" + page;
         } else if (mUrl.contains(Url.SERVER_OTRUB) || mUrl.contains(Url.SERVER_POLEKNIG)) {
             return mUrl.contains("?") ? mUrl + page : mUrl + "?p=" + page;
         } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)
-                || mUrl.contains(Url.SERVER_BAZA_KNIG)
-                || mUrl.contains(Url.SERVER_AUDIOBOO))
+                || mUrl.contains(Url.SERVER_BAZA_KNIG))
                 && !mUrl.contains(Url.SERVER_AKNIGA)) {
             return mUrl + page + "/";
         } else {
@@ -720,8 +723,8 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     private <T> void onPage(int page, ProviderPage<T> result, ListingCursor<T> cursor, Runnable show) {
         try {
             if (result.isFailure()) {
-                if (result.status == ProviderPage.Status.BLOCKED && mUrl.contains(Url.SERVER_BAZA_KNIG)) {
-                    getViewState().showToast(R.string.cookes_baza_knig_exeption);
+                if (result.status == ProviderPage.Status.BLOCKED) {
+                    getViewState().showToast(CookesExeption.messageFor(mUrl));
                 } else {
                     getViewState().showToast(R.string.error_load_data);
                 }

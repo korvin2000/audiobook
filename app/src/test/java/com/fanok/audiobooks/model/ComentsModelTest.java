@@ -32,7 +32,7 @@ public class ComentsModelTest {
     private static final String BAZA_KNIG
             = "https://baza-knig.top/alternativnaya-istoriiya/21849-studentka-komsomolka-sportsmenka-sergey-arsenev.html";
 
-    private static final String AUDIOBOO = "https://audioboo.org/fantastika/501-kniga.html";
+    private static final String AUDIOBOO = "https://audioboo.org/roman/40195-ross-yan-basad.html";
 
     private static final String NO_MORE_PAGES = "{\"navigation\":\"\",\"comments\":\"\"}";
 
@@ -223,15 +223,15 @@ public class ComentsModelTest {
     }
 
     @Test
-    public void audiobooMalformedCommentIsSkippedAndNoPlaceholderAvatarIsInvented() throws IOException {
+    public void audiobooCommentsInPageOrderWithoutAnInventedAvatar() throws IOException {
         ComentsModel.Parsed parsed = ComentsModel.parseCommentsAudioboo(page("audioboo/comments.html", AUDIOBOO), AUDIOBOO);
 
-        assertEquals(2, parsed.comments.size());
-        assertEquals(1, parsed.skipped);
-        assertEquals("Reader", parsed.comments.get(0).getName());
-        assertEquals("12 октября 2026", parsed.comments.get(0).getDate());
-        assertEquals("Отличная озвучка, спасибо!", parsed.comments.get(0).getText());
-        assertEquals("Listener", parsed.comments.get(1).getName());
+        assertEquals(25, parsed.comments.size());
+        assertEquals(0, parsed.skipped);
+        assertEquals("Sparta", parsed.comments.get(0).getName());
+        assertEquals("23 февраля 2023 01:11", parsed.comments.get(0).getDate());
+        assertEquals("Несомненно достойное произведение.", parsed.comments.get(0).getText());
+        assertEquals("Stoper", parsed.comments.get(24).getName());
         assertEquals("", parsed.comments.get(0).getImage());
     }
 

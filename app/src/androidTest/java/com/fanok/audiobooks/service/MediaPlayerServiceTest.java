@@ -29,6 +29,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.rule.GrantPermissionRule;
 import androidx.test.rule.ServiceTestRule;
 import com.fanok.audiobooks.Consts;
+import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.activity.BookActivity;
 import com.fanok.audiobooks.model.AudioDBModel;
 import com.fanok.audiobooks.model.AudioListDBModel;
@@ -91,8 +92,8 @@ public class MediaPlayerServiceTest {
     private MockWebServer server;
     private final Map<String, byte[]> files = new ConcurrentHashMap<>();
     private final List<String> books = new ArrayList<>();
-    /** Every response is a 503 while set. */
-    private volatile boolean failing;
+    /** Every response has this status while it is not 0. */
+    private volatile int failWith;
     private volatile long headersDelayMs;
     private volatile boolean neverAnswer;
     private String savedLast;
@@ -137,7 +138,7 @@ public class MediaPlayerServiceTest {
     @After
     public void tearDown() throws Exception {
         neverAnswer = false;
-        failing = false;
+        failWith = 0;
         serviceRule.unbindService();
         context.stopService(new Intent(context, MediaPlayerService.class));
         boolean stillRunning = awaitStopped();
@@ -206,27 +207,68 @@ public class MediaPlayerServiceTest {
                 || player(service).getPlayWhenReady() || service.isWantPlaying()));
     }
 
-    /** The server fails until Play: only the explicit command can recover, after the retry budget is spent. */
+    /**
+     * A refused chapter (404 fails the load at once) is retried once, then the player gives up honestly: the intent
+     * goes, the error is published, the notification offers Play, and Play recovers with a full budget.
+     */
     @Test
-    public void exhaustedRetriesPublishTheErrorAndPlayRecovers() throws Exception {
-        failing = true;
+    public void givingUpDropsTheIntentAndPlayRecovers() throws Exception {
+        failWith = 404;
         MediaPlayerService service = startAndBind(book("errors", 20), true);
-        await("retry budget spent: the error is published", 40_000,
-                () -> service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_ERROR);
-        assertTrue(describe(service), onMain(service::isWantPlaying));
-        assertTrue("first attempt and two retries", server.getRequestCount() >= 3);
+        //the first load, the one retry after its delay, its error
+        await("gave up: the error is published", PlaybackErrorPolicy.OTHER_RETRY_MS + 10_000,
+                () -> service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_ERROR
+                        && !service.isWantPlaying());
+        assertFalse(describe(service), onMain(() -> player(service).getPlayWhenReady()));
+        assertTrue("first attempt and one retry", server.getRequestCount() >= 2);
+        await("the notification offers Play", 3_000, () -> {
+            Notification notification = activeNotification();
+            if (notification == null || notification.actions == null) {
+                return false;
+            }
+            for (Notification.Action action : notification.actions) {
+                if (context.getString(R.string.play).contentEquals(action.title)) {
+                    return true;
+                }
+            }
+            return false;
+        });
 
         onMain(() -> {
-            failing = false;
+            failWith = 0;
             service.play();
             return null;
         });
-        await("playing after Play", 8_000, () -> player(service).isPlaying());
+        await("playing after Play", 8_000, () -> player(service).isPlaying() && service.isWantPlaying());
+    }
+
+    /**
+     * The server fails (503) for longer than Media3's default retry budget, then recovers: the player waits in
+     * BUFFERING without an error and resumes by itself, without a Play.
+     */
+    @Test
+    public void aServerThatRecoversWithinThePatientWindowResumesWithoutPlay() throws Exception {
+        failWith = 503;
+        MediaPlayerService service = startAndBind(book("patient", 20), true);
+        //Media3 retries a load after min((errors - 1) s, 5 s): the sixth request comes about 10 s in, well past
+        //the default minimum of three retries after which the error used to reach the player
+        await("past the default retry budget", 25_000, () -> server.getRequestCount() >= 6);
+        assertTrue(describe(service), onMain(() -> player(service).getPlayerError() == null
+                && player(service).getPlaybackState() == Player.STATE_BUFFERING
+                && player(service).getPlayWhenReady() && service.isWantPlaying()));
+        assertEquals(PlaybackStateCompat.STATE_BUFFERING,
+                (int) onMain(() -> service.getSessionPlaybackState().getState()));
+
+        failWith = 0;
+        //the next attempt is at most 5 s away
+        await("playing without Play", 12_000, () -> player(service).isPlaying());
+        assertTrue(describe(service), onMain(service::isWantPlaying));
     }
 
     @Test
     public void pauseDuringAPendingRetryKeepsItPausedWhenTheServerRecovers() throws Exception {
-        failing = true;
+        //a 404 fails the load at once; its one retry waits OTHER_RETRY_MS
+        failWith = 404;
         MediaPlayerService service = startAndBind(book("retry-pause", 20), true);
         await("first error, retry pending", 15_000, () -> player(service).getPlayerError() != null
                 && service.getSessionPlaybackState().getState() == PlaybackStateCompat.STATE_BUFFERING);
@@ -234,9 +276,9 @@ public class MediaPlayerServiceTest {
         sendAction(MediaPlayerService.ACTION_PAUSE);
         await("paused", 1_500, () -> !service.isWantPlaying());
         int requests = server.getRequestCount();
-        failing = false;
-        //past both backoff delays
-        Thread.sleep(8_000);
+        failWith = 0;
+        //past the retry's delay
+        Thread.sleep(PlaybackErrorPolicy.OTHER_RETRY_MS + 3_000);
 
         assertFalse(describe(service), onMain(() -> player(service).isPlaying()
                 || player(service).getPlayWhenReady() || service.isWantPlaying()));
@@ -575,8 +617,8 @@ public class MediaPlayerServiceTest {
         if (neverAnswer) {
             return new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE);
         }
-        if (failing) {
-            return new MockResponse().setResponseCode(503);
+        if (failWith != 0) {
+            return new MockResponse().setResponseCode(failWith);
         }
         byte[] wav = request.getRequestUrl() != null ? files.get(request.getRequestUrl().encodedPath()) : null;
         if (wav == null) {

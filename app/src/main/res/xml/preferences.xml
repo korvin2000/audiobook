@@ -186,6 +186,13 @@
         android:summary="@string/cookies_site_summary"
         android:title="@string/cookies_site" />
 
+    <SwitchPreferenceCompat
+        android:defaultValue="false"
+        android:icon="@drawable/ic_web"
+        android:key="pref_proxy"
+        android:summary="@string/proxy_summary"
+        android:title="@string/proxy_title" />
+
     <ListPreference
         android:defaultValue="@string/sort_value_date"
         android:dialogTitle="@string/setting_sort_favorite"

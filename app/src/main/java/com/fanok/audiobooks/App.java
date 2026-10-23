@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.offline.DownloadManager;
 import androidx.media3.exoplayer.scheduler.Requirements;
 import androidx.preference.PreferenceManager;
 
+import com.fanok.audiobooks.net.AppProxy;
 import com.fanok.audiobooks.net.MemoryCookieJar;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.presenter.BookPresenter;
@@ -151,6 +152,8 @@ public class App extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        //before any HTTP client exists: OkHttp captures the default ProxySelector when it is built
+        AppProxy.install(this);
         if (BuildConfig.DEBUG) {
             // Debug only: report main-thread disk/network access and leaked closeables/cursors (DATA-07).
             StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build());

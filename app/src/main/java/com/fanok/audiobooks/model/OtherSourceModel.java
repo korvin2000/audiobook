@@ -402,27 +402,24 @@ public class OtherSourceModel implements
         });
     }
 
+    /** Search cards: "Author - Title" headings, the author and reader ("Исполнитель:") in the card's list. */
     static ArrayList<Hit> parseAudiobooSearch(Document doc) {
-        Element list = doc.getElementById("dle-content");
-        if (list == null) {
-            return new ArrayList<>();
-        }
-        return each(list.getElementsByClass("short-item"), book -> {
-            Element a = book.selectFirst("a.short-title, .short-title a");
+        return each(doc.select("article.card"), book -> {
+            Element a = book.selectFirst(".card__title a");
             if (a == null) {
                 return null;
             }
             String author = "";
             String reader = "";
-            for (Element li : book.select(".short-list li")) {
-                String label = text(li, "span");
-                if (label.equals("Автор:")) {
+            for (Element li : book.select(".card__list li")) {
+                String label = li.text();
+                if (label.contains("Автор:")) {
                     author = text(li, "a");
-                } else if (label.equals("Читает:")) {
+                } else if (label.contains("Исполнитель:") || label.contains("Читает:")) {
                     reader = text(li, "a");
                 }
             }
-            return new Hit(a.absUrl("href"), a.text().trim(), author, reader);
+            return new Hit(a.absUrl("href"), withoutAuthor(a.text().trim(), author), author, reader);
         });
     }
 

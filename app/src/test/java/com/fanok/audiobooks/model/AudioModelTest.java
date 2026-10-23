@@ -201,6 +201,20 @@ public class AudioModelTest {
     }
 
     @Test
+    public void audiobooLivePlaylistDecodesGoPhpLinksToArchiveOrg() throws IOException {
+        String url = com.fanok.audiobooks.BookPageFixtures.BOOK_PAGES[6][1];
+        List<AudioPOJO> chapters = AudioModel.parseAudioboo(
+                com.fanok.audiobooks.BookPageFixtures.load(com.fanok.audiobooks.BookPageFixtures.BOOK_PAGES[6][0], url),
+                url);
+        assertEquals(21, chapters.size());
+        assertEquals("01. Глава 1", chapters.get(0).getName());
+        for (AudioPOJO chapter : chapters) {
+            // audio is not on audioboo.org (whose Cloudflare challenges every GET)
+            assertTrue(chapter.getUrl(), chapter.getUrl().startsWith("https://archive.org/download/"));
+        }
+    }
+
+    @Test
     public void audiobooChallengePropagatesAsCookesExeption() throws Exception {
         byte[] challenge = bytes("audioboo/challenge.html");
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {

@@ -32,7 +32,7 @@ public class BookPOJOTest {
         assertTrue(book.getUrlSeries(), book.getUrlSeries().startsWith("https://akniga.org/series/"));
         String audioboo = BOOK_PAGES[6][1];
         BookPOJO boo = BookPOJO.parseBookAudioboo(BookPageFixtures.load(BOOK_PAGES[6][0], audioboo), audioboo);
-        assertEquals("https://audioboo.org/xfsearch/cikl/tihie-doma/", boo.getUrlSeries());
+        assertEquals("https://audioboo.org/xfsearch/cikl/%D0%A1%D0%BE%D0%BB%D0%BE/", boo.getUrlSeries());
     }
 
     @Test
