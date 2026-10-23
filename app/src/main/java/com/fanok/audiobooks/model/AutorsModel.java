@@ -182,35 +182,37 @@ public class AutorsModel extends GenreModel {
 
     @Override
     protected ProviderPage<GenrePOJO> loadBooksListAudioboo(String url, int page) throws IOException {
-        Document doc = postSorted(url);
-        String marker = mPerformerMode ? "Исполнитель:" : "Автор:";
+        return parseAudiobooPeople(SiteHttp.get(url), mPerformerMode, page);
+    }
+
+    /**
+     * audioboo has no index of authors or readers: those of the listing page's cards, once each, linking to their
+     * book listings. The listing's pages are this list's pages.
+     */
+    static ProviderPage<GenrePOJO> parseAudiobooPeople(Document doc, boolean performers, int page) {
+        String marker = performers ? "Исполнитель:" : "Автор:";
         ArrayList<GenrePOJO> result = new ArrayList<>();
         ArrayList<String> names = new ArrayList<>();
-        for (Element block : doc.select("div.biography-content")) {
-            String html = block.html();
-            int idx = html.indexOf(marker);
-            if (idx < 0) {
-                continue;
-            }
-            int brIdx = html.indexOf("<br", idx);
-            String section = brIdx >= 0 ? html.substring(idx, brIdx) : html.substring(idx);
-            for (Element link : Jsoup.parse(section).select("a[href]")) {
-                String href = link.attr("href");
-                String name = link.text();
-                if (href.isEmpty() || name.isEmpty() || names.contains(name)) {
+        Elements cards = doc.select("article.card");
+        for (Element card : cards) {
+            for (Element li : card.select(".card__list li")) {
+                Element link = li.selectFirst("a[href]");
+                if (link == null || !li.text().contains(marker)) {
                     continue;
                 }
-                try {
-                    GenrePOJO author = new GenrePOJO();
-                    author.setUrl(href + "page/");
-                    author.setName(name);
-                    names.add(name);
-                    result.add(author);
-                } catch (RuntimeException ignored) {
+                String name = link.text().trim();
+                String href = link.absUrl("href");
+                if (name.isEmpty() || !Url.isHost(href, Url.SERVER_AUDIOBOO) || names.contains(name)) {
+                    continue;
                 }
+                GenrePOJO person = new GenrePOJO();
+                person.setUrl(href);
+                person.setName(name);
+                names.add(name);
+                result.add(person);
             }
         }
         int last = BooksModel.lastPage(doc.select(".navigation a, .pagination a"));
-        return ProviderPage.of(result, last > 0 ? last > page : !result.isEmpty());
+        return ProviderPage.of(result, last > 0 ? last > page : !cards.isEmpty(), cards.size());
     }
 }

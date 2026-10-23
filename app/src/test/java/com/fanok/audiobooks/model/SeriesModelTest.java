@@ -111,6 +111,16 @@ public class SeriesModelTest {
     }
 
     @Test
+    public void audiobooLiveSeriesFromTheBookPage() throws IOException {
+        String book = "https://audioboo.org/fantastika/123139-mahanenko-vasilij-solo-06.html";
+        String series = SeriesModel.parseAudiobooSeriesUrl(fixture("audioboo/book-description.html", book));
+        assertEquals("https://audioboo.org/xfsearch/cikl/%D0%A1%D0%BE%D0%BB%D0%BE/", series);
+        List<SeriesPOJO> books = SeriesModel.parseAudiobooSeriesPage(fixture("audioboo/series-solo.html", series));
+        assertEquals(6, books.size());
+        assertLinksOn(books, Url.SERVER_AUDIOBOO);
+    }
+
+    @Test
     public void audiobooSeriesLinksStayOnAudioboo() throws IOException {
         String series = SeriesModel.parseAudiobooSeriesUrl(
                 fixture("audioboo/series-book.html", "https://audioboo.org/fantastika/1001-nochnoj-dozor.html"));

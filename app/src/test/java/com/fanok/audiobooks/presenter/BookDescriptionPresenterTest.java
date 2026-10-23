@@ -13,8 +13,10 @@ public class BookDescriptionPresenterTest {
 
     @Test
     public void loadErrorsAreToldApart() {
-        assertEquals(R.string.cookes_baza_knig_exeption,
+        assertEquals(R.string.site_challenge,
                 BookDescriptionPresenter.errorMessage(new CookesExeption("https://izib.uk/art1")));
+        assertEquals(R.string.cookes_baza_knig_exeption,
+                BookDescriptionPresenter.errorMessage(new CookesExeption("https://baza-knig.top/a/1.html")));
         assertEquals(R.string.error_load_data,
                 BookDescriptionPresenter.errorMessage(new HttpStatusException("HTTP error", 503, "https://izib.uk")));
         assertEquals(R.string.error_load_data,

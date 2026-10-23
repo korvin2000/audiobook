@@ -1,6 +1,7 @@
 package com.fanok.audiobooks;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -113,19 +114,67 @@ public class Url {
 
     /** Lower-case host of {@code url} without a leading {@code www.}; empty when unparsable. */
     public static String hostOf(String url) {
-        if (url == null) {
+        URI uri = parse(url);
+        String host = uri == null ? null : uri.getHost();
+        if (host == null) {
             return "";
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        return host.startsWith("www.") ? host.substring(4) : host;
+    }
+
+    /**
+     * {@code url} as a {@link URI}, tolerating what browsers and Jsoup tolerate (akniga links authors as
+     * {@code /author/Кинг Стивен/}); null when it is still not a URI.
+     */
+    static URI parse(String url) {
+        if (url == null) {
+            return null;
         }
         try {
-            String host = URI.create(url.trim()).getHost();
-            if (host == null) {
-                return "";
+            return URI.create(url.trim());
+        } catch (IllegalArgumentException strict) {
+            try {
+                return URI.create(uriSafe(url));
+            } catch (IllegalArgumentException e) {
+                return null;
             }
-            host = host.toLowerCase(Locale.ROOT);
-            return host.startsWith("www.") ? host.substring(4) : host;
-        } catch (IllegalArgumentException e) {
-            return "";
         }
+    }
+
+    /**
+     * {@code url} trimmed, with what a browser percent-encodes but {@link URI} rejects encoded as UTF-8: spaces and
+     * control characters, {@code " < > ^ ` { | }} and a '%' that starts no escape. Structural characters
+     * ({@code : / ? # @ [ ] \}) are kept, so the authority splits exactly as before and a spoof stays unparsable.
+     */
+    private static String uriSafe(String url) {
+        String s = url.trim();
+        StringBuilder b = null;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean bad = c <= 0x20 || c == 0x7f || "\"<>^`{|}".indexOf(c) >= 0
+                    || (c > 0x7f && (Character.isSpaceChar(c) || Character.isISOControl(c)))
+                    || (c == '%' && !(i + 2 < s.length() && isHex(s.charAt(i + 1)) && isHex(s.charAt(i + 2))));
+            if (bad && b == null) {
+                b = new StringBuilder(s.length() + 16).append(s, 0, i);
+            }
+            if (b != null) {
+                if (bad) {
+                    for (byte x : String.valueOf(c).getBytes(StandardCharsets.UTF_8)) {
+                        b.append('%').append(HEX.charAt((x >> 4) & 0xf)).append(HEX.charAt(x & 0xf));
+                    }
+                } else {
+                    b.append(c);
+                }
+            }
+        }
+        return b == null ? s : b.toString();
+    }
+
+    private static final String HEX = "0123456789ABCDEF";
+
+    private static boolean isHex(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
     }
 
     /** True when {@code url} is served by {@code server} (a {@code SERVER_*} constant or any URL); compares parsed hosts. */
@@ -134,18 +183,57 @@ public class Url {
         return !host.isEmpty() && host.equals(hostOf(server));
     }
 
+    /** Drops a first-page marker ({@code /page/1/}, {@code /page/1}) that DataLife Engine sites redirect away. */
+    public static String withoutFirstPage(String url) {
+        int end = pathEnd(url);
+        return url.substring(0, end).replaceFirst("/page/1/?$", "/") + url.substring(end);
+    }
+
+    /**
+     * Page {@code page} of an audioboo listing: the index, a genre, an author, reader, tag or series link, with or
+     * without a trailing {@code page/} or {@code page/N/}. Page 1 is the bare listing, page N adds {@code page/N/}.
+     */
+    public static String audiobooListingPage(String url, int page) {
+        String trimmed = url.trim();
+        int end = pathEnd(trimmed);
+        String base = trimmed.substring(0, end).replaceFirst("/page(/\\d+)?/?$", "/");
+        if (!base.endsWith("/")) {
+            base += "/";
+        }
+        return (page <= 1 ? base : base + "page/" + page + "/") + trimmed.substring(end);
+    }
+
+    /** Where the path of {@code url} ends: at its query or fragment, else at its end. */
+    private static int pathEnd(String url) {
+        int scheme = url.indexOf("://");
+        for (int i = scheme < 0 ? 0 : scheme + 3; i < url.length(); i++) {
+            if (url.charAt(i) == '?' || url.charAt(i) == '#') {
+                return i;
+            }
+        }
+        return url.length();
+    }
+
     /** Rewrites a URL on a host that has since moved to the current host; other URLs are returned unchanged. */
     public static String canonical(String url) {
-        String host = hostOf(url);
-        String current = HOST_ALIASES.get(host);
+        String current = HOST_ALIASES.get(hostOf(url));
         if (current == null) {
             return url;
         }
-        URI uri = URI.create(url.trim());
+        //non-null: hostOf found a host
+        URI uri = parse(url);
+        String s = url.trim();
+        String raw = uri.getRawAuthority();
+        int start = s.indexOf("://") + 3;
+        if (start < 3 || !s.startsWith(raw, start)) {
+            //the authority itself needed encoding: leave such a URL alone
+            return url;
+        }
         String www = uri.getHost().toLowerCase(Locale.ROOT).startsWith("www.") ? "www." : "";
         String authority = (uri.getRawUserInfo() != null ? uri.getRawUserInfo() + "@" : "") + www + current
                 + (uri.getPort() >= 0 ? ":" + uri.getPort() : "");
-        return url.trim().replaceFirst(java.util.regex.Pattern.quote(uri.getRawAuthority()), authority)
+        //path, query and fragment stay byte-identical: they are identity keys of saved books and downloads
+        return (s.substring(0, start) + authority + s.substring(start + raw.length()))
                 .replaceFirst("^(?i)http://", "https://");
     }
 

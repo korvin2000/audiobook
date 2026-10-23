@@ -13,6 +13,7 @@ import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.net.SiteHttp;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.DescriptionPOJO;
+import com.fanok.audiobooks.search.Provider;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.schedulers.Schedulers;
 import java.io.IOException;
@@ -150,6 +151,29 @@ public class BookDescriptionModelTest {
     }
 
     @Test
+    public void audiobooRatingIsTheStarBarNotTheVoteCount() throws IOException {
+        String url = "https://audioboo.org/roman/40195-ross-yan-basad.html";
+        DescriptionPOJO d = BookDescriptionModel.parseDescription(BookPageFixtures.load("audioboo/comments.html", url), url);
+        assertEquals(BookPOJO.formatRating(5.0f, "288"), d.getReiting());
+        // no votes: no rating rather than the vote count "0"
+        String solo = BOOK_PAGES[6][1];
+        assertEquals("", BookDescriptionModel.parseDescription(BookPageFixtures.load(BOOK_PAGES[6][0], solo), solo)
+                .getReiting());
+    }
+
+    @Test
+    public void aknigaAuthorAndReaderFiltersRouteToAkniga() throws IOException {
+        String akniga = BOOK_PAGES[3][1];
+        DescriptionPOJO d = BookDescriptionModel.parseDescription(
+                BookPageFixtures.load(BOOK_PAGES[3][0], akniga), akniga);
+        assertEquals("https://akniga.org/author/Грэхем Йан/page<page>/", d.getAutorUrl());
+        assertEquals("https://akniga.org/performer/Ибраев Шад/page<page>/", d.getArtistUrl());
+        // the listing is chosen by host: a URL this app cannot route opens an empty page
+        assertEquals(Provider.AKNIGA, Provider.ofUrl(d.getAutorUrl().replace("<page>", "1")));
+        assertEquals(Provider.AKNIGA, Provider.ofUrl(d.getArtistUrl().replace("<page>", "1")));
+    }
+
+    @Test
     public void linksAreAbsoluteOnTheBookHost() throws IOException {
         String akniga = BOOK_PAGES[3][1];
         DescriptionPOJO d = BookDescriptionModel.parseDescription(
@@ -158,10 +182,14 @@ public class BookDescriptionModelTest {
         String audioboo = BOOK_PAGES[6][1];
         Document boo = BookPageFixtures.load(BOOK_PAGES[6][0], audioboo);
         DescriptionPOJO a = BookDescriptionModel.parseDescription(boo, audioboo);
-        assertEquals("https://audioboo.org/xfsearch/cikl/tihie-doma/", a.getSeriesUrl());
-        assertEquals("https://audioboo.org/xfsearch/author/ivan-petrov/", a.getAutorUrl());
+        assertEquals("https://audioboo.org/xfsearch/cikl/%D0%A1%D0%BE%D0%BB%D0%BE/", a.getSeriesUrl());
+        assertEquals("https://audioboo.org/xfsearch/avtora/%D0%9C%D0%B0%D1%85%D0%B0%D0%BD%D0%B5%D0%BD%D0%BA%D0%BE"
+                + "%20%D0%92%D0%B0%D1%81%D0%B8%D0%BB%D0%B8%D0%B9/", a.getAutorUrl());
+        // the related block lists the series, this book included: it is left out
         ArrayList<BookPOJO> books = BookDescriptionModel.parseBooks(boo, audioboo);
-        assertEquals(1, books.size());
-        assertEquals("https://audioboo.org/detektivy/1234-drugaya-kniga.html", books.get(0).getUrl());
+        assertEquals(5, books.size());
+        assertEquals("https://audioboo.org/fantastika/107329-mahanenko-vasilij-solo-01.html", books.get(0).getUrl());
+        assertEquals("Маханенко Василий - Соло 01", books.get(0).getName());
+        assertTrue(books.get(0).getPhoto(), books.get(0).getPhoto().startsWith("https://audioboo.org/uploads/"));
     }
 }

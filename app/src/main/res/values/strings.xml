@@ -395,6 +395,7 @@
     <string name="vpn_zaborona_europe_value" translatable="false">zaborona_europe</string>
     <string name="vpn_ukrane_value" translatable="false">vpn_ukrane</string>
     <string name="cookes_baza_knig_exeption">Сайт требует проверку в браузере. Откройте его в настройках (Cookies сайта) или попробуйте позже</string>
+    <string name="site_challenge">Сайт временно не пускает приложение (защита от ботов или перегрузка). Попробуйте позже</string>
     <string name="getCookies">Получить Cookies</string>
     <string name="cookies_info_baza_knig">Для доступа к источнику База Книг необходимо обновить Cookies</string>
     <string name="error_cookies_load">Не удалось обновить cookies</string>

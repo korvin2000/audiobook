@@ -10,6 +10,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 import java.io.IOException;
+import java.net.URL;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,6 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SiteHttp {
 
     public static final int TIMEOUT_MS = 10_000;
+    /** audioboo's rating and popularity sorts take 8-10 s on the server. */
+    static final int AUDIOBOO_TIMEOUT_MS = 30_000;
+    static final int MAX_REDIRECTS = 5;
     public static final int MAX_BODY_BYTES = 4 * 1024 * 1024;
     private static final String REFERRER = "https://www.google.com/";
     private static final Map<String, Map<String, String>> JAR = new ConcurrentHashMap<>();
@@ -49,6 +53,9 @@ public final class SiteHttp {
                 connection.cookie("PHPSESSID", session);
             }
         }
+        if (Url.isHost(url, Url.SERVER_AUDIOBOO)) {
+            connection.timeout(AUDIOBOO_TIMEOUT_MS);
+        }
         return connection;
     }
 
@@ -62,6 +69,66 @@ public final class SiteHttp {
      * merges cookies across redirects, so after a cross-host redirect nothing is recorded (they cannot be attributed).
      */
     public static Connection.Response execute(Connection connection) throws IOException {
+        if (Url.isHost(connection.request().url().toString(), Url.SERVER_AUDIOBOO)) {
+            return executePosted(connection, Url.SERVER_AUDIOBOO);
+        }
+        return executeOnce(connection);
+    }
+
+    /**
+     * audioboo.org: its Cloudflare answers every GET with a challenge while POST passes, and Jsoup re-sends a POST as
+     * GET when it follows a 301/302/303/308. Its pages are therefore POSTed (DataLife Engine reads the query of a POST
+     * too), {@code /page/1/} is dropped up front because the site redirects it, and redirects on {@code server}
+     * (never to plain HTTP from HTTPS) are followed by hand with the same POST and form. Any other redirect is an
+     * HTTP error.
+     */
+    static Connection.Response executePosted(Connection connection, String server) throws IOException {
+        connection.method(Connection.Method.POST).followRedirects(false);
+        connection.url(Url.withoutFirstPage(connection.request().url().toString()));
+        for (int hop = 0; ; hop++) {
+            Connection.Response response = executeOnce(connection);
+            int status = response.statusCode();
+            if (status < 300 || status > 399) {
+                return response;
+            }
+            //the redirect's body is not needed, but its connection must be released
+            response.bufferUp();
+            URL next = redirectTarget(response.url(), response.header("Location"));
+            if (next == null || hop >= MAX_REDIRECTS || !sameSite(response.url(), next, server)) {
+                throw new HttpStatusException("Redirect not followed", status, response.url().toString());
+            }
+            connection.url(next);
+        }
+    }
+
+    /** {@code location} resolved against {@code base}; a bare {@code ?query} keeps the path. Null when unusable. */
+    static URL redirectTarget(URL base, String location) {
+        if (location == null || location.trim().isEmpty()) {
+            return null;
+        }
+        String target = location.trim();
+        if (target.startsWith("?")) {
+            target = base.getPath() + target;
+        }
+        try {
+            return new URL(base, target);
+        } catch (java.net.MalformedURLException e) {
+            return null;
+        }
+    }
+
+    /** {@code next} is on {@code server}, on the same port or the default one, and not a downgrade from HTTPS. */
+    private static boolean sameSite(URL current, URL next, String server) {
+        boolean https = "https".equalsIgnoreCase(next.getProtocol());
+        if (!https && !next.getProtocol().equalsIgnoreCase(current.getProtocol())) {
+            return false;
+        }
+        int port = next.getPort() < 0 ? next.getDefaultPort() : next.getPort();
+        int currentPort = current.getPort() < 0 ? current.getDefaultPort() : current.getPort();
+        return Url.isHost(next.toString(), server) && (port == currentPort || port == next.getDefaultPort());
+    }
+
+    private static Connection.Response executeOnce(Connection connection) throws IOException {
         String requestedHost = Url.hostOf(connection.request().url().toString());
         Connection.Response response = connection.execute();
         Map<String, String> cookies = response.cookies();

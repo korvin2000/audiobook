@@ -9,7 +9,6 @@ import com.fanok.audiobooks.search.ProviderPage;
 import io.reactivex.Single;
 import java.io.IOException;
 import java.util.ArrayList;
-import org.jsoup.Connection;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -190,125 +189,28 @@ public class GenreModel implements com.fanok.audiobooks.interface_pacatge.books.
         return ProviderPage.of(result, false);
     }
 
-    /** DLE listings accept their sort order as a form; the genre list comes from the xsort filter of the index. */
-    static Document postSorted(String url) throws IOException {
-        Connection connection = SiteHttp.connect(url)
-                .method(Connection.Method.POST)
-                .data("dlenewssortby", "date")
-                .data("dledirection", "desc")
-                .data("set_new_sort", "dle_sort_main")
-                .data("set_direction_sort", "dle_direction_main");
-        return SiteHttp.parse(SiteHttp.execute(connection));
+    protected ProviderPage<GenrePOJO> loadBooksListAudioboo(String url, int page) throws IOException {
+        //one list for every page: the navigation menu of the index
+        return parseAudiobooGenres(SiteHttp.get(Url.SERVER_AUDIOBOO + "/"));
     }
 
-    protected ProviderPage<GenrePOJO> loadBooksListAudioboo(String url, int page) throws IOException {
-        Document doc = postSorted(url + page);
-        return ProviderPage.of(rows(doc.select("ul.xsort-ul[data-field=category] > li"), item -> {
-            if (item.attr("data-val").isEmpty()) {
-                return null;
-            }
-            String slug = genreNameToSlug(item.text());
-            if (slug.isEmpty()) {
+    /** The genres of the navigation menu, with the site's own URLs and the book count as the description. */
+    static ProviderPage<GenrePOJO> parseAudiobooGenres(Document doc) {
+        return ProviderPage.of(rows(doc.select("ul.navmenu li > a[href]"), item -> {
+            String name = item.ownText().trim();
+            String href = item.absUrl("href");
+            if (name.isEmpty() || !Url.isHost(href, Url.SERVER_AUDIOBOO)) {
                 return null;
             }
             GenrePOJO genrePOJO = new GenrePOJO();
-            genrePOJO.setUrl(Url.SERVER_AUDIOBOO + "/" + slug + "/page/");
-            genrePOJO.setName(item.text());
+            genrePOJO.setUrl(href);
+            genrePOJO.setName(name);
+            Element count = item.selectFirst("span");
+            if (count != null) {
+                genrePOJO.setDescription(count.text().replaceAll("[\\[\\]]", "").trim());
+            }
             return genrePOJO;
         }), false);
-    }
-
-    private static String genreNameToSlug(String name) {
-        switch (name) {
-            case "Альтернативная история": return "altist";
-            case "Аудиоспектакль": return "audiocpektakl";
-            case "Бизнес": return "biz";
-            case "Биография": return "biografiq";
-            case "Боевик": return "boevik";
-            case "Война": return "voina";
-            case "Детектив": return "didiktiva";
-            case "Детская литература": return "detskaya-literatura";
-            case "Драма": return "drama";
-            case "Интервью": return "intervy";
-            case "История": return "istoria";
-            case "Классика": return "klassika";
-            case "Лекция": return "lekciq";
-            case "Любовное Фэнтези": return "lffr";
-            case "Медицина": return "medicina";
-            case "Мемуары": return "memuari";
-            case "Мистика": return "mictika";
-            case "Новелла": return "novella";
-            case "Повесть": return "povest";
-            case "Познавательная литература": return "poznavatelnaya-literatura";
-            case "Попаданцы": return "popadanci";
-            case "Постапокалипсис": return "postapokalipsis";
-            case "Поэзия": return "poeziq";
-            case "Притча": return "pritcha";
-            case "Приключения": return "priklyucheniq";
-            case "Проза": return "proza";
-            case "Психология": return "psihologia";
-            case "Публицистика": return "publicictika";
-            case "Ранобэ": return "ranobe";
-            case "Религия": return "religiq";
-            case "Роман": return "roman";
-            case "Сказка": return "skazka";
-            case "Стихи": return "stihi";
-            case "Триллер": return "triller";
-            case "Ужасы": return "ugasy";
-            case "Учебник": return "uchebnik";
-            case "Фантастика": return "fantastika";
-            case "Философия": return "filosofiq";
-            case "Фэнтези": return "fenezi";
-            case "Хоррор": return "horror";
-            case "Эзотерика": return "ezoterika";
-            case "Эротика": return "erotika";
-            case "Юмор": return "umor";
-            default: return transliterateSimple(name);
-        }
-    }
-
-    private static String transliterateSimple(String s) {
-        StringBuilder sb = new StringBuilder();
-        for (char c : s.toLowerCase().toCharArray()) {
-            switch (c) {
-                case 'а': sb.append('a'); break;
-                case 'б': sb.append('b'); break;
-                case 'в': sb.append('v'); break;
-                case 'г': sb.append('g'); break;
-                case 'д': sb.append('d'); break;
-                case 'е': sb.append('e'); break;
-                case 'ё': sb.append('e'); break;
-                case 'ж': sb.append('z'); break;
-                case 'з': sb.append('z'); break;
-                case 'и': sb.append('i'); break;
-                case 'й': sb.append('y'); break;
-                case 'к': sb.append('k'); break;
-                case 'л': sb.append('l'); break;
-                case 'м': sb.append('m'); break;
-                case 'н': sb.append('n'); break;
-                case 'о': sb.append('o'); break;
-                case 'п': sb.append('p'); break;
-                case 'р': sb.append('r'); break;
-                case 'с': sb.append('s'); break;
-                case 'т': sb.append('t'); break;
-                case 'у': sb.append('u'); break;
-                case 'ф': sb.append('f'); break;
-                case 'х': sb.append('h'); break;
-                case 'ц': sb.append('c'); break;
-                case 'ч': sb.append("ch"); break;
-                case 'ш': sb.append("sh"); break;
-                case 'щ': sb.append("sch"); break;
-                case 'ъ': break;
-                case 'ы': sb.append('i'); break;
-                case 'ь': break;
-                case 'э': sb.append('e'); break;
-                case 'ю': sb.append("yu"); break;
-                case 'я': sb.append("ya"); break;
-                case ' ': sb.append('-'); break;
-                default: sb.append(c); break;
-            }
-        }
-        return sb.toString();
     }
 
     private ProviderPage<GenrePOJO> loadBooksListOtrub(String url) throws IOException {

@@ -123,21 +123,25 @@ public class OtherArtistModelTest {
     }
 
     @Test
-    public void audiobooOtherReadersFromSyntheticFixture() throws IOException {
+    public void audiobooOtherReadersFromTheLiveSearch() throws IOException {
         List<Hit> hits = OtherSourceModel.parseAudiobooSearch(
                 fixture("audioboo/other-source-search.html", "https://audioboo.org/index.php?do=search"));
-        List<OtherArtistPOJO> readers = OtherArtistModel.otherReaders(hits, "Ночной дозор", "Сергей Лукьяненко",
-                "https://audioboo.org/fantastika/1001-nochnoj-dozor.html", "Александр Кокшаров");
-        assertEquals(1, readers.size());
-        assertEquals("https://audioboo.org/fantastika/1004-nochnoj-dozor.html", readers.get(0).getUrl());
-        assertEquals("Исполнитель Валерий Смекалов", readers.get(0).getName());
+        List<OtherArtistPOJO> readers = OtherArtistModel.otherReaders(hits, "Дозор 01. Ночной Дозор",
+                "Сергей Лукьяненко", "https://audioboo.org/fenezi/110294-lukjanenko-sergej-dozor-01-nochnoj-dozor.html",
+                "Иван Солонинкин");
+        assertEquals(2, readers.size());
+        assertEquals("https://audioboo.org/fenezi/63305-lukjanenko-sergej-dozor-01-nochnoj-dozor.html",
+                readers.get(0).getUrl());
+        assertEquals("Исполнитель Кокшаров Александр", readers.get(0).getName());
+        assertEquals("https://audioboo.org/fenezi/63296-lukjanenko-sergej-dozory-01-nochnoj-dozor.html",
+                readers.get(1).getUrl());
     }
 
     @Test
     public void missingAuthorAndReaderAreNotCompared() throws IOException {
         List<Hit> hits = OtherSourceModel.parseAudiobooSearch(
                 fixture("audioboo/other-source-search.html", "https://audioboo.org/index.php?do=search"));
-        assertEquals(3, OtherArtistModel.otherReaders(hits, "Ночной дозор", null, null, null).size());
+        assertEquals(3, OtherArtistModel.otherReaders(hits, "Дозор 01. Ночной Дозор", null, null, null).size());
     }
 
     @Test

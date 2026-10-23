@@ -17,7 +17,9 @@ import io.reactivex.Single;
 import io.reactivex.functions.Function;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 import okhttp3.HttpUrl;
 import org.jsoup.nodes.Document;
@@ -207,28 +209,27 @@ public class BookDescriptionModel implements DescriptionModel {
     static ArrayList<BookPOJO> parseBooksAudioboo(Document document) {
         ArrayList<BookPOJO> books = new ArrayList<>();
 
-        Element root = document.getElementById("owl-rels");
+        //the related block: one cell per book, a cover link and a title link to the same page
+        Element root = document.getElementById("somids");
         if (root != null) {
-            Elements elements = root.getElementsByClass("popular-item");
-            for (Element book : elements) {
+            Set<String> seen = new HashSet<>();
+            for (Element cell : root.getElementsByTag("td")) {
+                Element img = cell.selectFirst("a[href$=.html] img");
+                Element title = cell.selectFirst("a[href$=.html]:not(:has(img))");
+                if (title == null || title.absUrl("href").equals(document.location())
+                        || !seen.add(title.absUrl("href"))) {
+                    continue;
+                }
                 BookPOJO bookPOJO = new BookPOJO();
-                Element a = book.getElementsByTag("a").first();
-                if (a != null) {
-                    bookPOJO.setUrl(a.absUrl("href"));
-                    Element name = a.getElementsByClass("popular-item-title anim").first();
-                    if (name != null) {
-                        bookPOJO.setName(name.text());
-                    }
-                    Element img = a.getElementsByTag("img").first();
-                    if (img != null) {
-                        bookPOJO.setPhoto(img.absUrl("data-src"));
-                    }
+                bookPOJO.setUrl(title.absUrl("href"));
+                bookPOJO.setName(title.text().trim());
+                if (img != null) {
+                    bookPOJO.setPhoto(img.absUrl("src"));
                 }
                 if (!bookPOJO.isNull()) {
                     books.add(bookPOJO);
                 }
             }
-
         }
         return books;
     }
@@ -653,9 +654,20 @@ public class BookDescriptionModel implements DescriptionModel {
             descriptionPOJO.setTitle(name);
         }
 
-        Element ratingContainer = document.getElementsByClass("figstar").first();
-        if (ratingContainer != null) {
-            descriptionPOJO.setReiting(ratingContainer.text().trim());
+        //stars are the width of the rating bar; .figstar is the vote count
+        Element stars = document.selectFirst(".card__metas .current-rating");
+        Element votes = document.selectFirst(".card__metas .figstar");
+        if (stars != null && votes != null) {
+            try {
+                float value = Float.parseFloat(stars.attr("style").replaceAll(".*width:\\s*", "")
+                        .replaceAll("[%\\s;].*", "")) / 20.0f;
+                String count = votes.text().trim();
+                if (value > 0 && !count.isEmpty() && !count.equals("0")) {
+                    descriptionPOJO.setReiting(BookPOJO.formatRating(value, count));
+                }
+            } catch (NumberFormatException ignored) {
+                // no rating rather than a wrong one
+            }
         }
 
         return descriptionPOJO;

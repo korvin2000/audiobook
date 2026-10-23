@@ -2,11 +2,13 @@ package com.fanok.audiobooks.model;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.search.Provider;
 import com.fanok.audiobooks.search.ProviderPage;
 
 import org.jsoup.Jsoup;
@@ -64,6 +66,54 @@ public class BooksModelParsersTest {
         assertEquals("Книги для бессонной ночи", page.items.get(11).getName()); // a card without an author
         assertTrue(page.hasMore);
         assertAllHaveNameAndUrl(page, Url.SERVER_AKNIGA);
+    }
+
+    @Test
+    public void aknigaAuthorListingPagesOneAndTwo() throws IOException {
+        String base = Url.SERVER_AKNIGA + "/author/Кинг Стивен/page";
+        ProviderPage<BookPOJO> p1 = BooksModel.parseAkniga(fixture("akniga/author-king-p1.html", base + "1/"), 1);
+        ProviderPage<BookPOJO> p2 = BooksModel.parseAkniga(fixture("akniga/author-king-p2.html", base + "2/"), 2);
+        assertEquals(12, p1.items.size());
+        assertEquals(12, p2.items.size());
+        assertTrue(p1.hasMore);
+        assertTrue(p2.hasMore);
+        assertNotEquals(p1.items.get(0).getUrl(), p2.items.get(0).getUrl());
+        assertAllHaveNameAndUrl(p1, Url.SERVER_AKNIGA);
+        for (BookPOJO book : p1.items) {
+            // the card links lead to listings this app can open again
+            if (book.getUrlAutor() != null) {
+                assertEquals(book.getUrlAutor(), Provider.AKNIGA,
+                        Provider.ofUrl(book.getUrlAutor().replace("<page>", "1")));
+            }
+        }
+    }
+
+    @Test
+    public void aknigaPerformerFirstAndLastPage() throws IOException {
+        String base = Url.SERVER_AKNIGA + "/performer/Панков Роман/page";
+        ProviderPage<BookPOJO> first = BooksModel.parseAkniga(fixture("akniga/performer-pankov-p1.html", base + "1/"), 1);
+        ProviderPage<BookPOJO> last = BooksModel.parseAkniga(fixture("akniga/performer-pankov-p12.html", base + "12/"), 12);
+        assertEquals(12, first.items.size());
+        assertTrue(first.hasMore);
+        assertEquals(11, last.items.size());
+        assertFalse(last.hasMore);
+    }
+
+    @Test
+    public void audiobooIndexGenreAndSearchPages() throws IOException {
+        ProviderPage<BookPOJO> index = BooksModel.parseAudioboo(
+                fixture("audioboo/listing-index-p1.html", Url.SERVER_AUDIOBOO + "/"), 1);
+        assertEquals(27, index.items.size());
+        assertTrue(index.hasMore);
+        assertAllHaveNameAndUrl(index, Url.SERVER_AUDIOBOO);
+        ProviderPage<BookPOJO> genre = BooksModel.parseAudioboo(
+                fixture("audioboo/listing-genre-p2.html", Url.SERVER_AUDIOBOO + "/didiktiva/page/2/"), 2);
+        assertEquals(27, genre.items.size());
+        assertTrue(genre.hasMore);
+        ProviderPage<BookPOJO> search = BooksModel.parseAudiobooSearch(
+                fixture("audioboo/search-master-p2.html", Url.SERVER_AUDIOBOO + "/index.php"), 2);
+        assertEquals(50, search.items.size());
+        assertTrue("its pager only links back to page 1", search.hasMore);
     }
 
     @Test

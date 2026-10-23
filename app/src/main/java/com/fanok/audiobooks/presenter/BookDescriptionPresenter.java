@@ -109,7 +109,7 @@ public class BookDescriptionPresenter extends MvpPresenter<Description> implemen
      */
     static int errorMessage(Throwable e) {
         if (e instanceof CookesExeption) {
-            return R.string.cookes_baza_knig_exeption;
+            return CookesExeption.messageFor(e.getMessage());
         }
         if (e instanceof IOException) {
             return R.string.error_load_data;

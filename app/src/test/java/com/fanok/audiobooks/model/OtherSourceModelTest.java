@@ -72,7 +72,6 @@ public class OtherSourceModelTest {
                 {"IZIBUK", "https://izib.uk/art1439"},
                 {"ABMP3", "https://audiobook-mp3.com/audio-3926-nochnojj-dozor-1"},
                 {"BAZA_KNIG", "https://baza-knig.top/fantastika-fentezii/31-lukyanenko-sergey-nochnoy-dozor.html"},
-                {"AUDIOBOO", "https://audioboo.org/fantastika/1001-nochnoj-dozor.html"},
                 {"POLEKNIG", "https://poleknig.com/books/130543"},
         };
         for (String[] row : expected) {
@@ -93,6 +92,18 @@ public class OtherSourceModelTest {
                     book("Ночной дозор", "Сергей Лукьяненко", null));
             assertTrue(site.name(), found != null && found.getUrl().startsWith(site.server));
         }
+    }
+
+    @Test
+    public void audiobooSearchCardsGiveTitleWithoutAuthorAndTheReader() throws IOException {
+        List<Hit> hits = OtherSourceModel.parseSearch(Site.AUDIOBOO, search(Site.AUDIOBOO));
+        assertEquals(6, hits.size());
+        // the site numbers cycles in its titles, so Lukyanenko's book is found under the site's own title
+        assertEquals("https://audioboo.org/fenezi/63305-lukjanenko-sergej-dozor-01-nochnoj-dozor.html",
+                OtherSourceModel.pickSameBook(Site.AUDIOBOO, hits,
+                        book("Дозор 01. Ночной Дозор", "Сергей Лукьяненко", "Александр Кокшаров")).getUrl());
+        assertEquals("https://audioboo.org/roman/10385-uoters-sara-nochnoy-dozor.html",
+                OtherSourceModel.pickSameBook(Site.AUDIOBOO, hits, book("Ночной дозор", "Сара Уотерс", null)).getUrl());
     }
 
     @Test

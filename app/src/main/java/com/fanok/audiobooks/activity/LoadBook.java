@@ -80,7 +80,7 @@ public class LoadBook extends AppCompatActivity {
                     public void onError(@NotNull Throwable e) {
                         int message;
                         if (e instanceof CookesExeption) {
-                            message = R.string.cookes_baza_knig_exeption; // any source can raise a challenge
+                            message = CookesExeption.messageFor(e.getMessage());
                         } else if (e instanceof IllegalArgumentException
                                 && String.valueOf(e.getMessage()).startsWith("unsupported host")) {
                             message = R.string.worong_data_sorce;

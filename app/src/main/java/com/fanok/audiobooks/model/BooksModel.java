@@ -30,6 +30,9 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
     /** ABMP3 returns every hit on one page; it is sliced client-side. */
     static final int ABMP3_PAGE_SIZE = 40;
 
+    /** Results per audioboo search page. */
+    static final int AUDIOBOO_SEARCH_PAGE_SIZE = 50;
+
     @Override
     public Single<ProviderPage<BookPOJO>> getBooks(String url, int page, String nameModel, Context context) {
         return Single.fromCallable(() -> listing(url, page, nameModel, context));
@@ -48,7 +51,7 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             case AKNIGA: return parseAkniga(SiteHttp.get(url), page);
             case BAZA_KNIG: return parseBazaKnig(SiteHttp.get(url), page);
             case KNIGOBLUD: return parseKnigoblud(SiteHttp.get(url), page);
-            case AUDIOBOO: return parseAudioboo(postForm(url), page);
+            case AUDIOBOO: return parseAudiobooSearch(postForm(url), page);
             case OTRUB: return parseOtrub(SiteHttp.get(url), page);
             case POLEKNIG: return parsePoleknig(SiteHttp.get(url), page);
         }
@@ -848,6 +851,12 @@ public class BooksModel implements com.fanok.audiobooks.interface_pacatge.books.
             return bookPOJO;
         });
         return ProviderPage.of(result, hasMore);
+    }
+
+    /** audioboo's search pager links only back to page 1: a full page means there may be another one. */
+    static ProviderPage<BookPOJO> parseAudiobooSearch(Document doc, int page) {
+        int cards = doc.select(".card.d-flex").size();
+        return ProviderPage.of(parseAudioboo(doc, page).items, cards >= AUDIOBOO_SEARCH_PAGE_SIZE, cards);
     }
 
     static ProviderPage<BookPOJO> parseAudioboo(Document doc, int page) {
