@@ -61,7 +61,7 @@ public class DescriptionPOJO {
     }
 
     public void setFavorite(String favorite) {
-        if (favorite != null && !favorite.equals(0) && !favorite.isEmpty()) {
+        if (favorite != null && !favorite.equals("0") && !favorite.isEmpty()) {
             this.favorite = favorite;
         }
     }
@@ -105,7 +105,7 @@ public class DescriptionPOJO {
     }
 
     public void setReiting(String reiting) {
-        this.reiting = reiting;
+        this.reiting = reiting == null ? "" : reiting;
     }
 
     public String getTime() {

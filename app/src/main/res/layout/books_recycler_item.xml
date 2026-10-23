@@ -93,7 +93,7 @@
                             android:layout_gravity="center_vertical"
                             android:layout_marginStart="@dimen/text_margin_book_description"
                             android:scaleType="centerInside"
-                            tools:ignore="ContentDescription" />
+                            android:contentDescription="@string/download_state_full" />
                     </LinearLayout>
                 </RelativeLayout>
 

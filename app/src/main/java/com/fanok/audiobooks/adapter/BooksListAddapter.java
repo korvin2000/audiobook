@@ -2,7 +2,6 @@ package com.fanok.audiobooks.adapter;
 
 import static android.content.Context.MODE_PRIVATE;
 import static android.content.Context.UI_MODE_SERVICE;
-import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_ENABLED;
 import static com.fanok.audiobooks.activity.ParentalControlActivity.PARENTAL_CONTROL_PREFERENCES;
 
 import android.annotation.SuppressLint;
@@ -10,9 +9,6 @@ import android.app.UiModeManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -21,6 +17,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
@@ -39,11 +36,6 @@ import com.fanok.audiobooks.pojo.AudioListPOJO;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.util.DownloadUtil;
 import com.github.lzyzsd.circleprogress.DonutProgress;
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.Proxy.Type;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -137,43 +129,22 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                 throw new NullPointerException();
             }
 
-            if (mPreferences.getBoolean(PARENTAL_CONTROL_ENABLED, false) && (book.getGenre() == null
-                    || book.getGenre().isEmpty() ||
-                    !mPreferences.getBoolean(book.getUrlGenre(), false))) {
-                Glide.with(mImageView).load(R.drawable.ic_parental_control).into(mImageView);
+            android.graphics.drawable.Drawable mask =
+                    com.fanok.audiobooks.policy.ParentalControl.coverMask(mImageView.getContext(), book);
+            if (mask != null) {
+                Glide.with(mImageView).load(mask).into(mImageView);
 
             } else {
                 if (book.getPhoto() != null && !book.getPhoto().isEmpty()) {
-                    if(App.useProxy&&book.getPhoto().contains(Url.SERVER_BAZA_KNIG)){
-
-                        final Bitmap[] bmp = {null};
-                        Handler handler = new Handler(Looper.getMainLooper());
-                        executor.execute(() -> {
-
-                            try {
-                                URL url = new URL(book.getPhoto());
-                                Proxy proxy = new Proxy(Type.SOCKS, new InetSocketAddress(Consts.PROXY_HOST, Consts.PROXY_PORT));
-                                bmp[0] = BitmapFactory.decodeStream(url.openConnection(proxy).getInputStream());
-                            } catch (IOException ignored) {
-                            }
-                            handler.post(() -> {
-                                if(bmp[0] !=null) {
-                                    mImageView.setImageBitmap(bmp[0]);
-                                }
-                            });
-                        });
-
+                    String photoPath = book.getPhoto();
+                    if (photoPath.startsWith("content://")) {
+                        Glide.with(mImageView).load(android.net.Uri.parse(photoPath)).into(mImageView);
+                    } else if (photoPath.startsWith("/") || photoPath.contains(":\\")) {
+                        Glide.with(mImageView).load(new java.io.File(photoPath)).into(mImageView);
                     } else {
-                        String photoPath = book.getPhoto();
-                        if (photoPath.startsWith("content://")) {
-                            Glide.with(mImageView).load(android.net.Uri.parse(photoPath)).into(mImageView);
-                        } else if (photoPath.startsWith("/") || photoPath.contains(":\\")) {
-                            Glide.with(mImageView).load(new java.io.File(photoPath)).into(mImageView);
-                        } else {
-                            Glide.with(mImageView).load(photoPath).into(mImageView);
-                        }
+                        Glide.with(mImageView).load(photoPath).into(mImageView);
                     }
-                                        } else {
+                } else {
                     mImageView.setImageDrawable(
                             ContextCompat.getDrawable(mImageView.getContext(), android.R.drawable.ic_menu_gallery));
                 }
@@ -286,10 +257,12 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
             } else if (dlStatus == 1) {
                 mIsDownload.setImageDrawable(
                         ContextCompat.getDrawable(mIsDownload.getContext(), R.drawable.ic_check_1));
+                mIsDownload.setContentDescription(mIsDownload.getContext().getString(R.string.download_state_partial));
                 mIsDownload.setVisibility(View.VISIBLE);
             } else {
                 mIsDownload.setImageDrawable(
                         ContextCompat.getDrawable(mIsDownload.getContext(), R.drawable.ic_check_all));
+                mIsDownload.setContentDescription(mIsDownload.getContext().getString(R.string.download_state_full));
                 mIsDownload.setVisibility(View.VISIBLE);
             }
 
@@ -387,8 +360,9 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
 
     @SuppressLint("NotifyDataSetChanged")
     public void setItem(ArrayList<BookPOJO> newModel) {
-        mModel = newModel;
-        preloadStatuses(newModel);
+        // a copy: the presenter keeps appending to its own list, the adapter must not see that
+        mModel = newModel == null ? new ArrayList<>() : new ArrayList<>(newModel);
+        preloadStatuses(mModel);
         notifyDataSetChanged();
     }
 
@@ -397,6 +371,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
         notifyDataSetChanged();
     }
 
+    @OptIn(markerClass = UnstableApi.class)
     private void preloadStatuses(ArrayList<BookPOJO> newModel) {
         if (newModel == null || newModel.isEmpty()) {
             progressCache.clear();
@@ -422,7 +397,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                     boolean saved = dbModel.inSaved(url);
 
                     int progress = -1;
-                    if (procent && saved && audioListModel != null) {
+                    if (procent && audioListModel != null) {
                         ArrayList<AudioListPOJO> pos = audioListModel.get(url);
                         if (pos.isEmpty()) {
                             progress = -1;
@@ -463,47 +438,37 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                             ArrayList<AudioListPOJO> list = audioListModel.get(url);
                             if (list != null && !list.isEmpty()) {
                                 int count = 0;
-                                java.io.File bookDir = null;
-                                try {
-                                    bookDir = com.fanok.audiobooks.util.DownloadStorageHelper.getBookDownloadDir(ctx, url, b.getName(), b.getArtist(), b.getAutor());
-                                } catch (Exception ignored) {}
-
+                                // A chapter counts as downloaded when its row records an app-written copy, when it is an
+                                // imported local file, or when its Media3 download (resolved by chapter identity) is complete.
+                                java.util.Set<String> withCopy = new java.util.HashSet<>();
+                                for (com.fanok.audiobooks.room.BooksAudioEntity row : audioListModel.getRows(url)) {
+                                    if (row.localUri != null && !row.localUri.isEmpty()) withCopy.add(row.urlAudio);
+                                }
+                                java.util.Map<String, Download> downloads = java.util.Collections.emptyMap();
+                                if (downloadIndex != null) {
+                                    java.util.List<String> urls = new java.util.ArrayList<>();
+                                    for (AudioListPOJO pojo : list) {
+                                        if (pojo != null && pojo.getAudioUrl() != null) urls.add(pojo.getAudioUrl());
+                                    }
+                                    try {
+                                        downloads = DownloadUtil.downloadsByChapterUrl(ctx, downloadIndex, url, urls);
+                                    } catch (Exception ignored) {}
+                                }
                                 for (AudioListPOJO pojo : list) {
                                     if (pojo == null) continue;
-                                    boolean isTrackDownloaded = false;
                                     String aUrl = pojo.getAudioUrl();
-                                    if (aUrl != null && !aUrl.isEmpty()) {
+                                    boolean isTrackDownloaded = withCopy.contains(aUrl);
+                                    if (!isTrackDownloaded && aUrl != null && !aUrl.isEmpty()) {
                                         if (aUrl.startsWith("content://") || aUrl.startsWith("file://")) {
                                             isTrackDownloaded = true;
                                         } else if (aUrl.startsWith("/")) {
-                                            if (new java.io.File(aUrl).exists()) {
-                                                isTrackDownloaded = true;
-                                            }
+                                            isTrackDownloaded = new java.io.File(aUrl).exists();
                                         }
                                     }
-
-                                    if (!isTrackDownloaded && downloadIndex != null) {
-                                        try {
-                                            Download d1 = downloadIndex.getDownload(pojo.getCleanAudioUrl());
-                                            if (d1 != null && d1.state == Download.STATE_COMPLETED) {
-                                                isTrackDownloaded = true;
-                                            } else if (aUrl != null) {
-                                                Download d2 = downloadIndex.getDownload(aUrl);
-                                                if (d2 != null && d2.state == Download.STATE_COMPLETED) {
-                                                    isTrackDownloaded = true;
-                                                }
-                                            }
-                                        } catch (Exception ignored) {}
+                                    if (!isTrackDownloaded) {
+                                        Download d = downloads.get(aUrl);
+                                        isTrackDownloaded = d != null && d.state == Download.STATE_COMPLETED;
                                     }
-
-                                    if (!isTrackDownloaded && bookDir != null && bookDir.exists() && pojo.getAudioName() != null) {
-                                        String sanitized = com.fanok.audiobooks.util.DownloadStorageHelper.sanitizeFileName(pojo.getAudioName());
-                                        java.io.File trackFile = new java.io.File(bookDir, sanitized + ".mp3");
-                                        if (trackFile.exists()) {
-                                            isTrackDownloaded = true;
-                                        }
-                                    }
-
                                     if (isTrackDownloaded) {
                                         count++;
                                     }

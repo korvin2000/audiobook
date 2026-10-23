@@ -13,6 +13,25 @@ public class AudioListPOJO {
     private int timeStart = -1;
 
     private int timeEnd = -1;
+    /** Exact URI of the copy this app exported, carried by backups so a restore keeps ownership; null when none. */
+    private String localUri;
+    private int ordinal = -1;
+
+    public String getLocalUri() {
+        return localUri;
+    }
+
+    public void setLocalUri(String localUri) {
+        this.localUri = localUri;
+    }
+
+    public int getOrdinal() {
+        return ordinal;
+    }
+
+    public void setOrdinal(int ordinal) {
+        this.ordinal = ordinal;
+    }
 
     public String getBookUrl() {
         return bookUrl;

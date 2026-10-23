@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.provider.SearchRecentSuggestions;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -29,7 +30,6 @@ import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.arellomobile.mvp.presenter.ProvidePresenter;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.GridSpacingItemDecoration;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.MySuggestionProvider;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
@@ -171,6 +171,8 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
                 break;
         }
 
+        binding.retrySources.setOnClickListener(v -> mPresenter.retryFailed());
+
         binding.list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
@@ -238,6 +240,11 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
             });
         }
 
+        // холодный ACTION_SEARCH (голосовой поиск, экземпляр под BookActivity) приходит в onCreate;
+        // при пересоздании (поворот) запрос уже хранится в презентере
+        if (savedInstanceState == null) {
+            handleIntent(intent);
+        }
     }
 
     private int getCount() {
@@ -252,7 +259,6 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
 
     @Override
     protected void onDestroy() {
-        mPresenter.onDestroy();
         if (mAddapterBooks != null) {
             mAddapterBooks.close();
         }
@@ -272,9 +278,18 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     @Override
     protected void onNewIntent(@NonNull Intent intent) {
         super.onNewIntent(intent);
-        if (Intent.ACTION_SEARCH.equals(intent.getAction())) {
+        setIntent(intent);
+        handleIntent(intent);
+        if (binding != null) {
+            binding.list.requestFocus();
+        }
+    }
+
+    private void handleIntent(Intent intent) {
+        if (intent != null && binding != null && (Intent.ACTION_SEARCH.equals(intent.getAction())
+                || MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH.equals(intent.getAction()))) {
             String query = intent.getStringExtra(SearchManager.QUERY);
-            if (query != null && binding != null) {
+            if (query != null) {
                 SearchRecentSuggestions suggestions = new SearchRecentSuggestions(this,
                         MySuggestionProvider.AUTHORITY, MySuggestionProvider.MODE);
                 suggestions.saveRecentQuery(query, null);
@@ -282,9 +297,6 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
                 mPresenter.setQuery(query);
                 mPresenter.loadBoks();
             }
-        }
-        if (binding != null) {
-            binding.list.requestFocus();
         }
     }
 
@@ -424,6 +436,17 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     }
 
     @Override
+    public void showSourcesFailed(int count) {
+        if (count > 0) {
+            binding.sourcesFailed.setText(getResources().getQuantityString(
+                    R.plurals.search_sources_failed, count, count));
+            binding.sourcesFailedLine.setVisibility(View.VISIBLE);
+        } else {
+            binding.sourcesFailedLine.setVisibility(View.GONE);
+        }
+    }
+
+    @Override
     public void returnResult(String url, String name, int modelId, String tag) {
         Intent intent = new Intent();
         intent.putExtra("url", url);
@@ -474,15 +497,11 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     @Override
     public void startBookActivity(@NotNull @NonNull BookPOJO bookPOJO) {
 
-        if (bookPOJO.getUrl().contains(Url.SERVER_ABMP3)) {
-            SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
-            if (preferences.getBoolean("speed_up_search_abmp3", false)) {
-                Intent intent = new Intent(this, LoadBook.class);
-                intent.putExtra("url", bookPOJO.getUrl());
-                startActivity(intent);
-            } else {
-                BookActivity.startNewActivity(this, bookPOJO);
-            }
+        if (Url.isHost(bookPOJO.getUrl(), Url.SERVER_ABMP3)) {
+            // ABMP3 search cards carry only title and URL: load the full description first
+            Intent intent = new Intent(this, LoadBook.class);
+            intent.putExtra("url", bookPOJO.getUrl());
+            startActivity(intent);
         } else {
             BookActivity.startNewActivity(this, bookPOJO);
         }
@@ -492,11 +511,6 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
         int spacing = (int) getResources().getDimension(R.dimen.recycler_item_margin);
         boolean includeEdge = true;
         binding.list.addItemDecoration(new GridSpacingItemDecoration(count, spacing, includeEdge));
-    }
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
     }
 
     @Override

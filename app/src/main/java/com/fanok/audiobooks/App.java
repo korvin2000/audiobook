@@ -1,62 +1,58 @@
 package com.fanok.audiobooks;
 
-import static com.fanok.audiobooks.Consts.PROXY_PASSWORD;
-import static com.fanok.audiobooks.Consts.PROXY_USERNAME;
-
+import android.os.StrictMode;
+import androidx.annotation.OptIn;
 import android.app.Application;
-import android.content.Context;
 import android.content.SharedPreferences;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.database.StandaloneDatabaseProvider;
-import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.cache.NoOpCacheEvictor;
 import androidx.media3.datasource.cache.SimpleCache;
+import androidx.media3.exoplayer.offline.DefaultDownloadIndex;
 import androidx.media3.exoplayer.offline.DownloadManager;
+import androidx.media3.exoplayer.scheduler.Requirements;
 import androidx.preference.PreferenceManager;
 
+import com.fanok.audiobooks.net.MemoryCookieJar;
 import com.fanok.audiobooks.pojo.StorageUtil;
 import com.fanok.audiobooks.presenter.BookPresenter;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
 import com.fanok.audiobooks.util.DownloadUtil;
 
 
+import io.reactivex.exceptions.UndeliverableException;
+import io.reactivex.plugins.RxJavaPlugins;
+
 import java.io.File;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
+import java.io.IOException;
+import java.net.SocketException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class App extends Application {
 
-    public static boolean useProxy;
-    private DownloadManager downloadManager;
-    private SimpleCache downloadCache;
+    /** Name of the Media3 download store below the app-specific files directory. */
+    static final String DOWNLOAD_CACHE_DIR = "media3_downloads";
+    private static final String PREF_DOWNLOAD_CACHE_DIR = "media3_download_cache_dir";
 
-    private StandaloneDatabaseProvider databaseProvider;
+    // One download manager, cache and executor for the process lifetime, created once on first use and never
+    // released or re-created: the download folder setting only names where explicit exports go.
+    private volatile DownloadManager downloadManager;
+    private volatile SimpleCache downloadCache;
+    private File downloadCacheDir;
+    private ExecutorService downloadExecutor;
+
+    private volatile StandaloneDatabaseProvider databaseProvider;
+    private static final MemoryCookieJar COOKIE_JAR = new MemoryCookieJar();
 
     private static App instance;
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        SharedPreferences pref = PreferenceManager
-                .getDefaultSharedPreferences(base);
-
-        String lang = pref.getString("pref_lang", "ru");
-        super.attachBaseContext(LocaleManager.onAttach(base, lang));
-    }
 
     public static File getCrashFile() {
         return new java.io.File(getInstance().getFilesDir(), "crash.txt");
     }
 
-    public static File getAnrFile() {
-        return new java.io.File(getInstance().getFilesDir(), "anr.txt");
-    }
-
     private static volatile String currentActivityName = "None";
-    private static volatile boolean isAppInForeground = false;
-    private static int startedActivitiesCount = 0;
 
     private static void appendCapped(File file, String content, int maxBytes) {
         try {
@@ -100,7 +96,6 @@ public class App extends Application {
             long freeMb = r.freeMemory() / (1024 * 1024);
             long usedMb = totalMb - freeMb;
             sb.append("Memory: used ").append(usedMb).append("MB / free ").append(freeMb).append("MB / max ").append(maxMb).append("MB\n");
-            sb.append("Proxy: ").append(useProxy ? "ON" : "OFF").append("\n");
             if (t != null) {
                 sb.append("EXCEPTION: ").append(t.getClass().getName()).append(": ").append(t.getMessage()).append("\n");
                 for (StackTraceElement e : t.getStackTrace()) {
@@ -121,104 +116,23 @@ public class App extends Application {
         }
     }
 
-    private final android.os.Handler anrHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-    private volatile long lastMainHeartbeat = android.os.SystemClock.uptimeMillis();
-    private static boolean anrWatcherStarted = false;
-    private volatile long lastAnrReportMs = 0;
-
-    private final Runnable heartbeatRunnable = new Runnable() {
-        @Override
-        public void run() {
-            lastMainHeartbeat = android.os.SystemClock.uptimeMillis();
-            if (isAppInForeground) {
-                anrHandler.postDelayed(this, 1000);
-            }
+    /**
+     * RxJava 2 global error handler: errors that can no longer be delivered (the subscriber is
+     * disposed) are logged when they are expected network/cancellation noise; bugs are forwarded
+     * to the thread's uncaught-exception handler instead of being swallowed.
+     */
+    static void handleRxError(Throwable e) {
+        if (e instanceof UndeliverableException && e.getCause() != null) {
+            e = e.getCause();
         }
-    };
-
-    private void restartHeartbeat() {
-        lastMainHeartbeat = android.os.SystemClock.uptimeMillis();
-        anrHandler.removeCallbacks(heartbeatRunnable);
-        anrHandler.post(heartbeatRunnable);
-    }
-
-    private void startAnrWatcher() {
-        if (anrWatcherStarted) return;
-        anrWatcherStarted = true;
-        restartHeartbeat();
-
-        final Thread watcher = new Thread(() -> {
-            while (true) {
-                try {
-                    if (!isAppInForeground) {
-                        Thread.sleep(5000);
-                        lastMainHeartbeat = android.os.SystemClock.uptimeMillis();
-                        continue;
-                    }
-                    Thread.sleep(3000);
-                    long stuckFor = android.os.SystemClock.uptimeMillis() - lastMainHeartbeat;
-                    if (stuckFor > 6000) {
-                        appendAnr(stuckFor);
-                    }
-                } catch (Exception ignored) {
-                    return;
-                }
-            }
-        }, "anr-watcher");
-        watcher.setDaemon(true);
-        watcher.start();
-    }
-
-    private boolean isMainThreadIdle(Thread mainThread) {
-        try {
-            StackTraceElement[] st = mainThread.getStackTrace();
-            if (st.length == 0) return false;
-            return "android.os.MessageQueue".equals(st[0].getClassName())
-                    && "nativePollOnce".equals(st[0].getMethodName());
-        } catch (Throwable t) {
-            return false;
+        if (e instanceof IOException || e instanceof SocketException || e instanceof InterruptedException) {
+            android.util.Log.w("App", "Undeliverable Rx error", e);
+            return;
         }
-    }
-
-    private void appendAnr(long stuckMs) {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastAnrReportMs < 120000) return;
-            Thread mainThread = android.os.Looper.getMainLooper().getThread();
-            if (isMainThreadIdle(mainThread)) return;
-            StringBuilder report = new StringBuilder();
-            String state = "";
-            for (int i = 0; i < 5; i++) {
-                if (isMainThreadIdle(mainThread)) break;
-                StackTraceElement[] st = mainThread.getStackTrace();
-                state = String.valueOf(mainThread.getState());
-                if (st.length > 0) {
-                    if (report.length() > 0) report.append("      -- sample ").append(i + 1).append("\n");
-                    for (StackTraceElement e : st) {
-                        report.append("    at ").append(e).append("\n");
-                    }
-                }
-                Thread.sleep(600);
-            }
-            if (report.length() == 0) return;
-            lastAnrReportMs = android.os.SystemClock.uptimeMillis();
-
-            Runtime r = Runtime.getRuntime();
-            long maxMb = r.maxMemory() / (1024 * 1024);
-            long totalMb = r.totalMemory() / (1024 * 1024);
-            long freeMb = r.freeMemory() / (1024 * 1024);
-            long usedMb = totalMb - freeMb;
-
-            StringBuilder sb = new StringBuilder();
-            sb.append("=== ANR main-thread blocked ").append(stuckMs).append(" ms (").append(new java.util.Date())
-                    .append(") state=").append(state).append(" ===\n");
-            sb.append("Screen: ").append(currentActivityName).append("\n");
-            sb.append("Memory: used ").append(usedMb).append("MB / free ").append(freeMb).append("MB / max ").append(maxMb).append("MB\n");
-            sb.append("Proxy: ").append(useProxy ? "ON" : "OFF").append("\n");
-            sb.append(report.toString()).append("\n");
-
-            appendCapped(getAnrFile(), sb.toString(), 30000);
-        } catch (Exception ignored) {
+        Thread thread = Thread.currentThread();
+        Thread.UncaughtExceptionHandler handler = thread.getUncaughtExceptionHandler();
+        if (handler != null) {
+            handler.uncaughtException(thread, e);
         }
     }
 
@@ -228,10 +142,20 @@ public class App extends Application {
 
     public static okhttp3.OkHttpClient okHttpClientInstance;
 
-    @UnstableApi
+    /** Cookies of the shared client: response cookies are resent to their host for the process lifetime. */
+    public static MemoryCookieJar getCookieJar() {
+        return COOKIE_JAR;
+    }
+
+    @OptIn(markerClass = UnstableApi.class)
     @Override
     public void onCreate() {
         super.onCreate();
+        if (BuildConfig.DEBUG) {
+            // Debug only: report main-thread disk/network access and leaked closeables/cursors (DATA-07).
+            StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build());
+            StrictMode.setVmPolicy(new StrictMode.VmPolicy.Builder().detectAll().penaltyLog().build());
+        }
         instance = this;
 
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
@@ -239,105 +163,67 @@ public class App extends Application {
             public void onActivityCreated(@androidx.annotation.NonNull android.app.Activity activity, @androidx.annotation.Nullable android.os.Bundle savedInstanceState) {}
             @Override
             public void onActivityStarted(@androidx.annotation.NonNull android.app.Activity activity) {
-                startedActivitiesCount++;
-                isAppInForeground = true;
                 currentActivityName = activity.getClass().getSimpleName();
-                restartHeartbeat();
             }
             @Override
             public void onActivityResumed(@androidx.annotation.NonNull android.app.Activity activity) {
-                isAppInForeground = true;
                 currentActivityName = activity.getClass().getSimpleName();
-                restartHeartbeat();
             }
             @Override
             public void onActivityPaused(@androidx.annotation.NonNull android.app.Activity activity) {}
             @Override
-            public void onActivityStopped(@androidx.annotation.NonNull android.app.Activity activity) {
-                startedActivitiesCount = Math.max(0, startedActivitiesCount - 1);
-                if (startedActivitiesCount == 0) {
-                    isAppInForeground = false;
-                }
-            }
+            public void onActivityStopped(@androidx.annotation.NonNull android.app.Activity activity) {}
             @Override
             public void onActivitySaveInstanceState(@androidx.annotation.NonNull android.app.Activity activity, @androidx.annotation.NonNull android.os.Bundle outState) {}
             @Override
             public void onActivityDestroyed(@androidx.annotation.NonNull android.app.Activity activity) {}
         });
 
-        startAnrWatcher();
-
+        final Thread.UncaughtExceptionHandler previousHandler = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             try {
                 writeStackToFile(getCrashFile(), throwable);
             } catch (Exception ignored) {
+            } finally {
+                if (previousHandler != null) {
+                    previousHandler.uncaughtException(thread, throwable);
+                } else {
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                    System.exit(10);
+                }
             }
         });
+        RxJavaPlugins.setErrorHandler(App::handleRxError);
 
         try {
-            try {
-                java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1);
-            } catch (Throwable ignored) {}
+            okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder().cookieJar(COOKIE_JAR);
 
-            javax.net.ssl.SSLSocketFactory sf = Consts.socketFactory();
-            javax.net.ssl.HttpsURLConnection.setDefaultSSLSocketFactory(sf);
-            javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(new javax.net.ssl.HostnameVerifier() {
-                @Override
-                public boolean verify(String hostname, javax.net.ssl.SSLSession session) {
-                    return true;
-                }
-            });
-
-            // Настройка Picasso / OkHttp для обхода просроченного сертификата CDN
-            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
-                    new javax.net.ssl.X509TrustManager() {
-                        public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[]{}; }
-                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
-                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
-                    }
-            };
-
-            // Читаем настройки прокси перед созданием клиента
-            android.content.SharedPreferences pref = androidx.preference.PreferenceManager
-                    .getDefaultSharedPreferences(this);
-            useProxy = pref.getBoolean("pref_proxy", false);
-            
-            okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder()
-                    .sslSocketFactory(sf, (javax.net.ssl.X509TrustManager) trustAllCerts[0])
-                    .hostnameVerifier((hostname, session) -> true);
-
-            if (useProxy) {
-                java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.SOCKS,
-                        new java.net.InetSocketAddress(Consts.PROXY_HOST, Consts.PROXY_PORT));
-                builder.proxy(proxy);
-            }
-
-            builder.addNetworkInterceptor(new okhttp3.Interceptor() {
-                @Override
-                public okhttp3.Response intercept(Chain chain) throws java.io.IOException {
-                    okhttp3.Request original = chain.request();
-                    okhttp3.Request.Builder requestBuilder = original.newBuilder();
-                    
-                    // Unconditionally force a real browser User-Agent to prevent 403s on audio streams
+            // Application interceptor (runs before OkHttp adds its own User-Agent): fills in defaults
+            // only, never overrides a header the caller or the DownloadUtil resolver already set.
+            builder.addInterceptor(chain -> {
+                okhttp3.Request original = chain.request();
+                okhttp3.Request.Builder requestBuilder = original.newBuilder();
+                if (original.header("User-Agent") == null) {
                     requestBuilder.header("User-Agent", Consts.USER_AGENT);
-                    
-                    if (original.url().toString().contains("poleknig.com")) {
+                }
+                if (original.header("Referer") == null) {
+                    String url = original.url().toString();
+                    if (url.contains("poleknig.com")) {
                         requestBuilder.header("Referer", "https://poleknig.com/");
-                    } else if (original.url().toString().contains("izib.uk") || (original.header("Referer") != null && original.header("Referer").contains("izib.uk"))) {
+                    } else if (url.contains("izib.uk")) {
                         requestBuilder.header("Referer", Url.SERVER_IZIBUK + "/");
-                    } else if (original.url().toString().contains("akniga.org")) {
+                    } else if (url.contains("akniga.org")) {
                         requestBuilder.header("Referer", "https://akniga.org/");
                     }
-                    
-                    return chain.proceed(requestBuilder.build());
                 }
+                return chain.proceed(requestBuilder.build());
             });
 
             okHttpClientInstance = builder.build();
 
             com.squareup.picasso.Picasso picasso = new com.squareup.picasso.Picasso.Builder(this)
                     .downloader(new com.squareup.picasso.OkHttp3Downloader(okHttpClientInstance))
-                    .loggingEnabled(true)
+                    .loggingEnabled(BuildConfig.DEBUG)
                     .build();
             com.squareup.picasso.Picasso.setSingletonInstance(picasso);
 
@@ -345,23 +231,12 @@ public class App extends Application {
             e.printStackTrace();
                     }
 
-        // --- ВОЗВРАЩАЕМ ПРОСТОЙ И ПОНЯТНЫЙ КОД ---
-        databaseProvider = new StandaloneDatabaseProvider(this);
-        reinitDownloadManagerAsync();
-
 
         // User's original code
         SharedPreferences pref = PreferenceManager
                 .getDefaultSharedPreferences(this);
 
-        String themeName = pref.getString("pref_theme", getString(R.string.theme_dark_value));
-        if (themeName.equals(getString(R.string.theme_dark_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-        } else if (themeName.equals(getString(R.string.theme_light_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-        } else if (themeName.equals(getString(R.string.theme_black_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-        }
+        AppThemes.applyNightMode(this);
 
         Consts.setBazaKnigCookies(pref.getString("cookes_baza_knig", ""));
 
@@ -372,116 +247,154 @@ public class App extends Application {
 
         Consts.setSOURCE(this, source);
 
-        useProxy = pref.getBoolean("pref_proxy", false);
-        if(useProxy){
-            Authenticator authenticator = new Authenticator() {
-                public PasswordAuthentication getPasswordAuthentication() {
-                    return (new PasswordAuthentication(PROXY_USERNAME,
-                            PROXY_PASSWORD.toCharArray()));
-                }
-            };
-            Authenticator.setDefault(authenticator);
-        }
+        getDownloadManager();
     }
 
 
     public StandaloneDatabaseProvider getDatabaseProvider() {
-        return databaseProvider;
+        StandaloneDatabaseProvider provider = databaseProvider;
+        if (provider == null) {
+            synchronized (this) {
+                if (databaseProvider == null) databaseProvider = new StandaloneDatabaseProvider(this);
+                provider = databaseProvider;
+            }
+        }
+        return provider;
     }
 
     public static App getInstance() {
         return instance;
     }
 
-    @UnstableApi
+    /**
+     * The one download manager. Contract: it is created on the main thread (eagerly at the end of {@link #onCreate}),
+     * so its listeners and requirement watcher run on the main looper; a caller on another thread that comes first
+     * has the creation posted to the main looper and waits for it, failing with an IllegalStateException after
+     * {@link #MAIN_THREAD_WAIT_SECONDS} instead of creating it on its own thread.
+     */
+    @OptIn(markerClass = UnstableApi.class)
     public DownloadManager getDownloadManager() {
         DownloadManager dm = downloadManager;
         if (dm == null) {
-            synchronized (this) {
-                dm = downloadManager;
-                if (dm == null) {
-                    reinitDownloadManager();
-                    dm = downloadManager;
-                }
-            }
+            createDownloadStackOnMain();
+            dm = downloadManager;
         }
         return dm;
-    }
-
-    public void reinitDownloadManagerAsync() {
-        new Thread(() -> {
-            try {
-                reinitDownloadManager();
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-        }, "reinit-download-manager").start();
-    }
-
-    public synchronized void reinitDownloadManager() {
-        try {
-            stopService(new android.content.Intent(this, com.fanok.audiobooks.service.ExoDownloadService.class));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        if (downloadManager != null) {
-            try {
-                downloadManager.release();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            downloadManager = null;
-        }
-        if (downloadCache != null) {
-            try {
-                downloadCache.release();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            downloadCache = null;
-        }
-
-        File baseDownloadDir = new File(DownloadStorageHelper.getDownloadPath(this));
-        if (!baseDownloadDir.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            baseDownloadDir.mkdirs();
-        }
-        File downloadDirectory = new File(baseDownloadDir, ".audiobooks_cache");
-        if (!downloadDirectory.exists()) {
-            if (!downloadDirectory.mkdirs()) {
-                downloadDirectory = baseDownloadDir;
-            }
-        }
-        try {
-            downloadCache = new SimpleCache(downloadDirectory, new NoOpCacheEvictor(), databaseProvider);
-        } catch (Exception e) {
-            e.printStackTrace();
-            downloadDirectory = new File(getCacheDir(), "downloads");
-            //noinspection ResultOfMethodCallIgnored
-            downloadDirectory.mkdirs();
-            downloadCache = new SimpleCache(downloadDirectory, new NoOpCacheEvictor(), databaseProvider);
-        }
-
-        DataSource.Factory resolvingDataSourceFactory = DownloadUtil.getResolvingUpstreamFactory(this);
-
-        downloadManager = new DownloadManager(
-                this,
-                databaseProvider,
-                downloadCache,
-                resolvingDataSourceFactory,
-                Executors.newFixedThreadPool(3)
-        );
-        downloadManager.setMaxParallelDownloads(1);
     }
 
     public SimpleCache getDownloadCache() {
         SimpleCache cache = downloadCache;
         if (cache == null) {
-            getDownloadManager();
+            createDownloadStackOnMain();
             cache = downloadCache;
         }
         return cache;
+    }
+
+    private static final long MAIN_THREAD_WAIT_SECONDS = 10;
+
+    @OptIn(markerClass = UnstableApi.class)
+    private void createDownloadStackOnMain() {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            createDownloadStack();
+            return;
+        }
+        java.util.concurrent.FutureTask<Void> task = new java.util.concurrent.FutureTask<>(this::createDownloadStack, null);
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(task);
+        try {
+            task.get(MAIN_THREAD_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new IllegalStateException("DownloadManager not created: the main thread did not run the creation within "
+                    + MAIN_THREAD_WAIT_SECONDS + " s", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while the main thread creates the DownloadManager", e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new IllegalStateException("DownloadManager creation failed", e.getCause());
+        }
+    }
+
+    /** Directory of the Media3 download store (app-specific, never the user folder or the clearable cache dir). */
+    public File getDownloadCacheDir() {
+        getDownloadCache();
+        return downloadCacheDir;
+    }
+
+    /**
+     * Creates the download store once: a non-evicting {@link SimpleCache} in app-specific storage, its executor (Media3
+     * downloads HLS segments in parallel on it) and the manager. The volatile manager is published last, so a reader
+     * that sees it also sees the cache.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private synchronized void createDownloadStack() {
+        if (downloadManager != null) return;
+        File dir = downloadStoreDir();
+        SimpleCache cache = new SimpleCache(dir, new NoOpCacheEvictor(), getDatabaseProvider());
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        DownloadManager dm = new DownloadManager(this, new DefaultDownloadIndex(getDatabaseProvider()),
+                DownloadUtil.downloaderFactory(this, cache, executor));
+        dm.setMaxParallelDownloads(1);
+        dm.setRequirements(new Requirements(Requirements.NETWORK));
+        downloadCacheDir = dir;
+        downloadExecutor = executor;
+        downloadCache = cache;
+        downloadManager = dm;
+    }
+
+    /**
+     * The store directory, chosen once and remembered so it never moves between runs. A store left in an old place
+     * (below the download folder, or the cache-dir fallback) is moved here; the new place is remembered only once it
+     * holds the store, so after a failed move the old store stays in use and the move is retried on the next start.
+     */
+    private File downloadStoreDir() {
+        SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(this);
+        String saved = pref.getString(PREF_DOWNLOAD_CACHE_DIR, null);
+        if (saved != null) return new File(saved);
+        File base = getExternalFilesDir(null);
+        if (base == null) base = getFilesDir();
+        File target = new File(base, DOWNLOAD_CACHE_DIR);
+        File dir = chooseStoreDir(target, java.util.Arrays.asList(
+                new File(DownloadStorageHelper.getDownloadPath(this), ".audiobooks_cache"),
+                new File(getCacheDir(), "downloads")),
+                (from, to) -> (!to.exists() || to.delete()) && from.renameTo(to));
+        if (dir.equals(target)) {
+            pref.edit().putString(PREF_DOWNLOAD_CACHE_DIR, dir.getAbsolutePath()).apply();
+        } else {
+            android.util.Log.w("App", "Download store not moved, still using " + dir);
+        }
+        return dir;
+    }
+
+    /** Moves a store directory; true when {@code to} now holds it. */
+    interface StoreMover {
+        boolean move(File from, File to);
+    }
+
+    /**
+     * Where the download store lives: {@code target} when it already holds data or no legacy store does; else the
+     * first legacy store with data, moved into {@code target} by {@code mover}, or left where it is (and returned)
+     * when the move fails.
+     */
+    static File chooseStoreDir(File target, java.util.List<File> legacy, StoreMover mover) {
+        if (hasEntries(target)) return target;
+        for (File old : legacy) {
+            if (!hasEntries(old)) continue;
+            return mover.move(old, target) ? target : old;
+        }
+        return target;
+    }
+
+    private static boolean hasEntries(File dir) {
+        String[] names = dir.list();
+        return names != null && names.length > 0;
+    }
+
+    @Override
+    public void onTerminate() {
+        ExecutorService executor = downloadExecutor;
+        if (executor != null) executor.shutdown();
+        DownloadUtil.shutdown();
+        super.onTerminate();
     }
 
 }

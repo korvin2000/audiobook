@@ -19,26 +19,26 @@ import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
-import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadIndex;
 import androidx.recyclerview.widget.RecyclerView;
+import com.fanok.audiobooks.App;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.R;
-import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.pojo.AudioPOJO;
 import com.fanok.audiobooks.util.DownloadUtil;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /** @noinspection ClassEscapesDefinedScope*/
-@UnstableApi
+@OptIn(markerClass = UnstableApi.class)
 public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> {
 
     private static final String TAG = "AudioAdapter";
@@ -50,7 +50,9 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> 
     private AudioAdapter.OnListItemSelectedInterface mListener;
 
     private AudioAdapter.OnSelectedListner mSelectedListner;
+    /** Chapter URL → the download holding it (by its DownloadIds entry, else its legacy id). */
     private final Map<String, Download> allDownloads;
+    private String bookUrl;
 
     private final int[] states = new int[] {
             Download.STATE_COMPLETED,
@@ -105,37 +107,39 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> 
         mSelectedListner = selectedListner;
     }
 
-    @SuppressLint("NotifyDataSetChanged")
-    public void refresh() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final HashMap<String, Download> tempMap = new HashMap<>();
-                try {
-                    DownloadIndex index = DownloadUtil.getDownloadManager().getDownloadIndex();
-                    try (DownloadCursor cursor = index.getDownloads(states)) {
-                        while (cursor.moveToNext()) {
-                            Download d = cursor.getDownload();
-                            tempMap.put(d.request.id, d);
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Failed to query downloads", e);
-                }
-                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
-                    @Override
-                    public void run() {
-                        allDownloads.clear();
-                        allDownloads.putAll(tempMap);
-                        notifyDataSetChanged();
-                    }
-                });
-            }
-        }, "audio-adapter-refresh").start();
+    /** The book whose chapters are listed: their downloads are looked up by their ids within it. */
+    public void setBookUrl(String bookUrl) {
+        this.bookUrl = bookUrl;
+        refresh();
     }
 
+    @SuppressLint("NotifyDataSetChanged")
+    public void refresh() {
+        final String book = bookUrl;
+        final List<String> urls = new ArrayList<>();
+        for (AudioPOJO audio : mData) urls.add(audio.getUrl());
+        DownloadUtil.runInBackground(() -> {
+            final HashMap<String, Download> byUrl = new HashMap<>();
+            try {
+                DownloadIndex index = DownloadUtil.getDownloadManager().getDownloadIndex();
+                for (Map.Entry<String, Download> e : DownloadUtil.downloadsByChapterUrl(
+                        App.getInstance(), index, book, urls).entrySet()) {
+                    if (isStateMatch(states, e.getValue().state)) byUrl.put(e.getKey(), e.getValue());
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to query downloads", e);
+            }
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                allDownloads.clear();
+                allDownloads.putAll(byUrl);
+                notifyDataSetChanged();
+            });
+        });
+    }
+
+    /** A copy of the chosen chapter URLs, so clearing the selection never changes what was handed over. */
     public HashSet<String> getSelectedItems() {
-        return mSelectedItems;
+        return new HashSet<>(mSelectedItems);
     }
 
     public int getSelectedItemsSize() {
@@ -146,6 +150,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> 
     public void setData(@NonNull ArrayList<AudioPOJO> data) {
         mData = data;
         notifyDataSetChanged();
+        refresh();
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -238,12 +243,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> 
 
 
         String url = mData.get(i).getUrl();
-        String cleanUrl = mData.get(i).getCleanUrl();
-        Download dTmp = allDownloads.get(cleanUrl);
-        if (dTmp == null && url != null) {
-            dTmp = allDownloads.get(url);
-        }
-        final Download download = (dTmp != null && dTmp.state != Download.STATE_REMOVING) ? dTmp : null;
+        final Download download = url != null ? allDownloads.get(url) : null;
         final int dlState = download != null ? download.state : -1;
 
         if (download != null && isStateMatch(states, dlState)){

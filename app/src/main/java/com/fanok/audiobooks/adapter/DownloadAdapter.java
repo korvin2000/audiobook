@@ -1,6 +1,5 @@
 package com.fanok.audiobooks.adapter;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -8,8 +7,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
+import android.text.TextUtils;
 import android.text.style.StyleSpan;
-import android.util.SparseBooleanArray;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,7 +16,9 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.RecyclerView;
@@ -28,18 +29,28 @@ import com.fanok.audiobooks.pojo.DownloadItem;
 import com.squareup.picasso.Picasso;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
+/**
+ * Rows of the Downloads screen. The adapter holds an immutable snapshot that is replaced as a whole; selection and
+ * expansion are kept by the row's stable id, so a refresh never moves them to another book.
+ */
+@OptIn(markerClass = UnstableApi.class)
 public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHolder> {
 
-    private ArrayList<DownloadItem> itemList;
-    private SparseBooleanArray selectedItems = new SparseBooleanArray();
+    private List<DownloadItem> itemList = Collections.emptyList();
+    private final Set<String> selectedIds = new LinkedHashSet<>();
+    private final Set<String> expandedIds = new HashSet<>();
 
     public interface OnDownloadControlClickListener {
-        void onRestartClick(DownloadItem item, int position);
-        void onPauseClick(DownloadItem item, int position);
-        void onResumeClick(DownloadItem item, int position);
-        void onOpenClick(DownloadItem item, int position);
+        void onRestartClick(DownloadItem item);
+        void onPauseClick(DownloadItem item);
+        void onResumeClick(DownloadItem item);
+        void onOpenClick(DownloadItem item);
     }
 
     public interface OnItemSelectionListener {
@@ -51,48 +62,72 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
         this.selectionListener = listener;
     }
 
-    private OnDownloadControlClickListener mListener;
+    private final OnDownloadControlClickListener mListener;
 
     public DownloadAdapter(OnDownloadControlClickListener listener) {
-        itemList = new ArrayList<>();
         mListener = listener;
     }
 
-    public SparseBooleanArray getSelectedItems() {
-        return selectedItems;
+    /** The selected rows of the current snapshot, resolved now into an immutable list. */
+    @NonNull
+    public List<DownloadItem> getSelectedItems() {
+        List<DownloadItem> selected = new ArrayList<>();
+        for (DownloadItem item : itemList) {
+            if (selectedIds.contains(item.getId())) selected.add(item);
+        }
+        return Collections.unmodifiableList(selected);
     }
 
     public int getSelectedItemsSize() {
-        return selectedItems.size();
+        return selectedIds.size();
     }
 
+    @Nullable
     public DownloadItem getItem(int position) {
-        return itemList.get(position);
+        return position >= 0 && position < itemList.size() ? itemList.get(position) : null;
     }
 
+    /** Redraws the row of {@code item} (e.g. after a cancelled swipe), wherever it is now. */
+    public void restore(@NonNull DownloadItem item) {
+        for (int i = 0; i < itemList.size(); i++) {
+            if (itemList.get(i).getId().equals(item.getId())) {
+                notifyItemChanged(i);
+                return;
+            }
+        }
+    }
 
-    public void setItemList(@NonNull ArrayList<DownloadItem> itemList) {
-        this.itemList = new ArrayList<>(itemList);
-        notifyDataSetChanged();
+    /** Shows a new snapshot; rows are matched by id, and selections of rows that are gone are dropped. */
+    public void submit(@NonNull List<DownloadItem> snapshot) {
+        final List<DownloadItem> oldList = itemList;
+        final List<DownloadItem> newList = Collections.unmodifiableList(new ArrayList<>(snapshot));
+        Set<String> ids = new HashSet<>();
+        for (DownloadItem item : newList) ids.add(item.getId());
+        boolean selectionChanged = selectedIds.retainAll(ids);
+        expandedIds.retainAll(ids);
+
+        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new DownloadDiffCallback(oldList, newList));
+        itemList = newList;
+        diff.dispatchUpdatesTo(this);
+        if (selectionChanged) {
+            notifySelectionChanged();
+        }
     }
 
     public void selectAll() {
-        if (selectedItems.size() == itemList.size()) return;
-
-        for (int i = 0; i < itemList.size(); i++) {
-            selectedItems.put(i, true);
-        }
+        if (selectedIds.size() == itemList.size()) return;
+        for (DownloadItem item : itemList) selectedIds.add(item.getId());
         notifyDataSetChanged();
-
-        if (selectionListener != null) {
-           selectionListener.onSelectionChanged();
-        }
+        notifySelectionChanged();
     }
 
     public void clearSelection() {
-        selectedItems.clear();
+        selectedIds.clear();
         notifyDataSetChanged();
+        notifySelectionChanged();
+    }
 
+    private void notifySelectionChanged() {
         if (selectionListener != null) {
             selectionListener.onSelectionChanged();
         }
@@ -106,11 +141,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
         return new ViewHolder(binding);
     }
 
-    @SuppressLint("UnsafeOptInUsageError")
     @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-        DownloadItem item = itemList.get(position);
-        holder.bind(item, mListener);
+        holder.bind(itemList.get(position), mListener);
     }
 
     @Override
@@ -127,7 +160,6 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
         }
 
 
-        @SuppressLint("UnsafeOptInUsageError")
         public void bind (DownloadItem item, OnDownloadControlClickListener listener) {
 
             String fileIcon = item.getFileIcon();
@@ -168,6 +200,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
             setIconForDetailTextView(binding.textAuthor, R.drawable.ic_autor, 12);
             setIconForDetailTextView(binding.textPerformer, R.drawable.ic_artist, 12);
             setIconForDetailTextView(binding.textChapterName, R.drawable.ic_bookmark_outline, 12);
+            setIconForDetailTextView(binding.textExported, R.drawable.ic_download, 12);
             setIconForDetailTextView(binding.sourceName, R.drawable.ic_web, 12);
 
             if (item.getProgress()>0) {
@@ -177,10 +210,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
                 binding.progressDownload.setIndeterminate(true);
             }
 
-
-
-            // Название файла
-            binding.textFileName.setText(item.getFileName());
+            Context context = itemView.getContext();
+            String title = item.getBookName() == null || item.getBookName().isEmpty() ? item.getBookUrl() : item.getBookName();
+            binding.textFileName.setText(title);
 
             if (item.getBookName() == null || item.getBookName().isEmpty()) {
                 binding.textBookName.setVisibility(View.GONE);
@@ -203,12 +235,14 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
                 binding.textPerformer.setText(getStyledLabelAndValue("Исполнитель:", item.getReader()));
             }
 
-            if (item.getChapterName() == null || item.getChapterName().isEmpty()) {
-                binding.textChapterName.setVisibility(View.GONE);
-            } else {
-                binding.textChapterName.setVisibility(View.VISIBLE);
-                binding.textChapterName.setText(getStyledLabelAndValue("Трек:", item.getChapterName()));
-            }
+            binding.textChapterName.setVisibility(View.VISIBLE);
+            binding.textChapterName.setText(getStyledLabelAndValue(context.getString(R.string.download_chapters_label),
+                    context.getString(R.string.download_chapters_value, item.getCompleted(), item.getTotal(), item.getSelected())));
+
+            binding.textExported.setVisibility(View.VISIBLE);
+            binding.textExported.setText(getStyledLabelAndValue(context.getString(R.string.download_exported_label),
+                    item.getExportedChapters().isEmpty() ? context.getString(R.string.download_exported_none)
+                            : TextUtils.join(", ", item.getExportedChapters())));
 
             if (item.getSource() == null || item.getSource().isEmpty()) {
                 binding.sourceName.setVisibility(View.GONE);
@@ -219,25 +253,19 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
 
             binding.buttonControlDownload.setOnClickListener(v -> {
                 if (listener == null) return;
-
-                int position = getBindingAdapterPosition();
-                if (position == RecyclerView.NO_POSITION) return;
-
-                int status = item.getStatus();
-
-                switch (status) {
+                switch (item.getStatus()) {
                     case Download.STATE_DOWNLOADING:
                     case Download.STATE_QUEUED:
-                        listener.onPauseClick(item, position);
+                        listener.onPauseClick(item);
                         break;
                     case Download.STATE_STOPPED:
-                        listener.onResumeClick(item, position);
+                        listener.onResumeClick(item);
                         break;
                     case Download.STATE_FAILED:
-                        listener.onRestartClick(item, position);
+                        listener.onRestartClick(item);
                         break;
                     case Download.STATE_COMPLETED:
-                        listener.onOpenClick(item, position);
+                        listener.onOpenClick(item);
                         break;
                     default:
                         break;
@@ -245,60 +273,46 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
             });
 
 
+            final String id = item.getId();
             itemView.setOnClickListener(v -> {
-                int adapterPosition = getBindingAdapterPosition();
-                if (adapterPosition == RecyclerView.NO_POSITION) return;
                 boolean isVisible = binding.layoutDetails.getVisibility() == View.VISIBLE;
                 binding.layoutDetails.setVisibility(isVisible ? View.GONE : View.VISIBLE);
-                item.setExpanded(!isVisible);
+                if (isVisible) expandedIds.remove(id); else expandedIds.add(id);
             });
-            binding.layoutDetails.setVisibility(item.isExpanded() ? View.VISIBLE : View.GONE);
+            binding.layoutDetails.setVisibility(expandedIds.contains(id) ? View.VISIBLE : View.GONE);
 
 
             binding.checkboxSelect.setOnClickListener(v -> {
-                int adapterPosition = getBindingAdapterPosition();
-                if (adapterPosition == RecyclerView.NO_POSITION) return;
-                if (selectedItems.size() > 0) {
-                    toggleSelection(adapterPosition);
+                if (!selectedIds.isEmpty()) {
+                    toggleSelection(id);
                 }
             });
 
 
             itemView.setOnLongClickListener(v -> {
-                int adapterPosition = getBindingAdapterPosition();
-                if (adapterPosition == RecyclerView.NO_POSITION) return true;
-                toggleSelection(adapterPosition);
+                toggleSelection(id);
                 return true;
             });
 
 
-            if (selectedItems.size() > 0){
-                binding.checkboxSelect.setVisibility(View.VISIBLE);
-            }else {
-                binding.checkboxSelect.setVisibility(View.GONE);
-            }
-            binding.checkboxSelect.setChecked(selectedItems.get(getBindingAdapterPosition(), false));
+            binding.checkboxSelect.setVisibility(selectedIds.isEmpty() ? View.GONE : View.VISIBLE);
+            binding.checkboxSelect.setChecked(selectedIds.contains(id));
 
 
-            updateUiForStatus(item.getStatus());
+            updateUiForStatus(item);
         }
 
 
-        private void toggleSelection(int position) {
-            if (selectedItems.get(position, false)) {
-                selectedItems.delete(position);
-            } else {
-                selectedItems.put(position, true);
+            private void toggleSelection(String id) {
+            if (!selectedIds.remove(id)) {
+                selectedIds.add(id);
             }
             notifyDataSetChanged();
-            if (selectionListener != null) {
-                selectionListener.onSelectionChanged();
-            }
+            notifySelectionChanged();
         }
 
-        @SuppressLint("UnsafeOptInUsageError")
-        private void updateUiForStatus(int status) {
-            switch (status) {
+        private void updateUiForStatus(DownloadItem item) {
+            switch (item.getStatus()) {
                 case Download.STATE_DOWNLOADING:
                 case Download.STATE_QUEUED:
                     binding.progressDownload.setVisibility(View.VISIBLE);
@@ -309,7 +323,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
                     binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_play, 24));
                     break;
                 case Download.STATE_COMPLETED:
-                    binding.progressDownload.setVisibility(View.INVISIBLE);
+                    // A book is complete only when every chapter is; otherwise the bar shows how much of it is.
+                    binding.progressDownload.setVisibility(item.isComplete() ? View.INVISIBLE : View.VISIBLE);
                     binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_is_check, 24));
                     break;
                 case Download.STATE_FAILED:
@@ -374,32 +389,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
 
     }
 
-    public void updateItems(@NonNull ArrayList<DownloadItem> newItems) {
-        final ArrayList<DownloadItem> oldList = new ArrayList<>(this.itemList);
-        for (DownloadItem newItem : newItems) {
-            for (DownloadItem oldItem : oldList) {
-                if (oldItem.getFileName().equals(newItem.getFileName())) {
-                    newItem.setExpanded(oldItem.isExpanded());
-                    break;
-                }
-            }
-        }
-
-        final DownloadDiffCallback diffCallback = new DownloadDiffCallback(oldList, newItems);
-        final DiffUtil.DiffResult diffResult = DiffUtil.calculateDiff(diffCallback);
-
-        // 3. Обновляем список и отправляем изменения в адаптер
-        this.itemList.clear();
-        this.itemList.addAll(newItems);
-        diffResult.dispatchUpdatesTo(this);
-    }
-
     private static class DownloadDiffCallback extends DiffUtil.Callback {
 
         private final List<DownloadItem> oldList;
         private final List<DownloadItem> newList;
 
-        public DownloadDiffCallback(List<DownloadItem> oldList, List<DownloadItem> newList) {
+        DownloadDiffCallback(List<DownloadItem> oldList, List<DownloadItem> newList) {
             this.oldList = oldList;
             this.newList = newList;
         }
@@ -416,18 +411,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
 
         @Override
         public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
-            return oldList.get(oldItemPosition).getFileName().equals(newList.get(newItemPosition).getFileName());
+            return oldList.get(oldItemPosition).getId().equals(newList.get(newItemPosition).getId());
         }
 
-        // Проверяем, изменилось ли содержимое. Больше не меняем состояние!
         @Override
         public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
-            DownloadItem oldItem = oldList.get(oldItemPosition);
-            DownloadItem newItem = newList.get(newItemPosition);
-
-            return oldItem.getStatus() == newItem.getStatus()
-                    && oldItem.getProgress() == newItem.getProgress()
-                    && oldItem.isExpanded() == newItem.isExpanded(); // Сравниваем, но не изменяем
+            return oldList.get(oldItemPosition).sameContents(newList.get(newItemPosition));
         }
     }
 

@@ -2,7 +2,6 @@ package com.fanok.audiobooks.interface_pacatge.book_content;
 
 
 import android.content.Intent;
-import android.content.ServiceConnection;
 import androidx.annotation.NonNull;
 import com.arellomobile.mvp.MvpView;
 import com.arellomobile.mvp.viewstate.strategy.AddToEndSingleStrategy;
@@ -34,9 +33,6 @@ public interface Activity extends MvpView {
 
     void showTitle(@NonNull String name);
 
-    @StateStrategyType(SkipStrategy.class)
-    void decode(@NonNull String key);
-
     @StateStrategyType(AddToEndSingleStrategy.class)
     void updateTime(int timeCurent, int timeEnd, int buffered);
 
@@ -54,9 +50,6 @@ public interface Activity extends MvpView {
 
     @StateStrategyType(SkipStrategy.class)
     void activityStart(@NonNull Intent intent);
-
-    @StateStrategyType(SkipStrategy.class)
-    void myUnbindService(@NonNull ServiceConnection serviceConnection);
 
     @StateStrategyType(AddToEndSingleStrategy.class)
     void stateCollapsed();

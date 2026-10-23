@@ -7,6 +7,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Drawable;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -17,7 +18,6 @@ import androidx.fragment.app.Fragment;
 import com.arellomobile.mvp.InjectViewState;
 import com.arellomobile.mvp.MvpPresenter;
 import com.fanok.audiobooks.Consts;
-import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.fragment.BooksFragment;
@@ -28,28 +28,30 @@ import com.fanok.audiobooks.model.BooksModel;
 import com.fanok.audiobooks.model.GenreModel;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.policy.ParentalControl;
+import com.fanok.audiobooks.search.ListingCursor;
+import com.fanok.audiobooks.search.ProviderPage;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.squareup.picasso.Picasso;
-import io.reactivex.Observer;
 import io.reactivex.android.schedulers.AndroidSchedulers;
-import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
 import java.util.ArrayList;
 import java.util.Objects;
-import org.jetbrains.annotations.NotNull;
 
 @InjectViewState
 public class BooksPresenter extends MvpPresenter<BooksView> implements
         com.fanok.audiobooks.interface_pacatge.books.BooksPresenter {
 
-    private static final String TAG = "BooksPresenter";
     private boolean isLoading = false;
     private boolean isRefreshing = false;
-    private int page = 0;
     private final int mModelId;
     private final String mSubTitle;
     private ArrayList<BookPOJO> books;
     private ArrayList<GenrePOJO> genre;
+    private final ListingCursor<BookPOJO> mBookCursor = new ListingCursor<>(b -> Url.canonical(b.getUrl()));
+    private final ListingCursor<GenrePOJO> mGenreCursor = new ListingCursor<>(GenrePOJO::getUrl);
+    private final CompositeDisposable mDisposables = new CompositeDisposable();
     private com.fanok.audiobooks.interface_pacatge.books.BooksModel mModelBook;
     private com.fanok.audiobooks.interface_pacatge.books.GenreModel mModelGenre;
     private final BooksDBModel mBooksDBModel;
@@ -57,14 +59,12 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
 
     private final String mUrl;
-    private boolean isEnd;
 
     public BooksPresenter(@NonNull String url, int modelId, @NonNull String subTitle,
             @NonNull Context context) {
         mUrl = url;
         mModelId = modelId;
         mSubTitle = subTitle;
-        isEnd = false;
         mBooksDBModel = new BooksDBModel(context);
         switch (mModelId) {
             case Consts.MODEL_BOOKS:
@@ -91,8 +91,17 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
     @Override
     public void onDestroy() {
+        cancel();
         mBooksDBModel.closeDB();
-        //mContext = null;
+    }
+
+    /** Cancels the running load and resets the loading state with it, so no spinner or flag stays stuck. */
+    private void cancel() {
+        mDisposables.clear();
+        isLoading = false;
+        isRefreshing = false;
+        getViewState().showProgres(false);
+        getViewState().showRefreshing(false);
     }
 
     @Override
@@ -102,44 +111,45 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     }
 
     @Override
+    public void attachView(BooksView view) {
+        super.attachView(view);
+        // a listing whose load was cancelled before anything arrived starts again
+        if (!isLoading && !cursor().isEnd() && cursor().items().isEmpty()) {
+            loadBoks();
+        }
+    }
+
+    private ListingCursor<?> cursor() {
+        return mModelId == Consts.MODEL_BOOKS ? mBookCursor : mGenreCursor;
+    }
+
+    @Override
     public void loadBoks() {
-        if (!isEnd && !isRefreshing && !isLoading) {
+        if (!cursor().isEnd() && !isLoading) {
             getViewState().showProgres(true);
-            page++;
-            if (mModelId != Consts.MODEL_GENRE) {
-                if (mUrl.contains(Url.SERVER_KNIGOBLUD)){
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "/" + page);
-                    }
-                } else if (mUrl.contains(Url.SERVER_OTRUB)){
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "?p=" + page);
-                    }
-                } else if (mUrl.contains(Url.SERVER_POLEKNIG)){
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "?p=" + page);
-                    }
-                } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)
-                        || mUrl.contains(Url.SERVER_BAZA_KNIG)
-                        || mUrl.contains(Url.SERVER_AUDIOBOO))
-                        && !mUrl.contains(Url.SERVER_AKNIGA)) {
-                    getData(mUrl + page + "/");
-                } else {
-                    getData(mUrl.replace("<page>", Integer.toString(page)));
-                }
-            } else {
-                getData(mUrl);
-            }
+            getData(cursor().nextPage());
         } else {
             getViewState().showRefreshing(false);
         }
+    }
 
+    /** The listing URL of {@code page} in the provider's own scheme; genre lists have a single page. */
+    private String pageUrl(int page) {
+        if (mModelId == Consts.MODEL_GENRE) {
+            return mUrl;
+        }
+        if (mUrl.contains(Url.SERVER_KNIGOBLUD)) {
+            return mUrl.contains("?") ? mUrl + page : mUrl + "/" + page;
+        } else if (mUrl.contains(Url.SERVER_OTRUB) || mUrl.contains(Url.SERVER_POLEKNIG)) {
+            return mUrl.contains("?") ? mUrl + page : mUrl + "?p=" + page;
+        } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)
+                || mUrl.contains(Url.SERVER_BAZA_KNIG)
+                || mUrl.contains(Url.SERVER_AUDIOBOO))
+                && !mUrl.contains(Url.SERVER_AKNIGA)) {
+            return mUrl + page + "/";
+        } else {
+            return mUrl.replace("<page>", Integer.toString(page));
+        }
     }
 
     @Override
@@ -158,7 +168,11 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
         TextView artist = layout.findViewById(R.id.artist);
         TextView series = layout.findViewById(R.id.series);
 
-        if (books.get(position).getPhoto() != null) {
+        Drawable mask = ParentalControl.coverMask(view.getContext(), books.get(position));
+        if (mask != null) {
+            ImageView imageView = layout.findViewById(R.id.imageView);
+            imageView.setImageDrawable(mask);
+        } else if (books.get(position).getPhoto() != null) {
             ImageView imageView = layout.findViewById(R.id.imageView);
             Picasso.get()
                     .load(books.get(position).getPhoto())
@@ -664,144 +678,65 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     public void onRefresh() {
         if (!isLoading) {
             isRefreshing = true;
-            isEnd = false;
             getViewState().showRefreshing(true);
-            page = 1;
-            if (mModelId != Consts.MODEL_GENRE) {
-                if (mUrl.contains(Url.SERVER_KNIGOBLUD)) {
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "/" + page);
-                    }
-                } else if (mUrl.contains(Url.SERVER_OTRUB)){
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "?p=" + page);
-                    }
-                } else if (mUrl.contains(Url.SERVER_POLEKNIG)){
-                    if (mUrl.contains("?")) {
-                        getData(mUrl + page);
-                    } else {
-                        getData(mUrl + "?p=" + page);
-                    }
-                } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)
-                        || mUrl.contains(Url.SERVER_BAZA_KNIG)
-                        || mUrl.contains(Url.SERVER_AUDIOBOO))
-                        && !mUrl.contains(Url.SERVER_AKNIGA)) {
-                    getData(mUrl + page + "/");
-                } else {
-                    getData(mUrl.replace("<page>", Integer.toString(page)));
-                }
-            } else {
-                getData(mUrl);
-            }
+            getData(1); // the cursor moves only when page 1 arrives
         } else {
             getViewState().showRefreshing(false);
         }
-
     }
 
 
-    private void getData(String url) {
-        if (!isLoading) {
-            isLoading = true;
-            if (mModelId == Consts.MODEL_BOOKS) {
-                mModelBook.getBooks(url, page, mSubTitle.trim(), mContext.getApplicationContext())
-                        .subscribeOn(Schedulers.io())
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(new Observer<ArrayList<BookPOJO>>() {
-                            @Override
-                            public void onError(@NotNull Throwable e) {
-                                if (e.getClass() == CookesExeption.class) {
-                                    if (String.valueOf(e.getMessage()).contains(Url.SERVER_BAZA_KNIG)) {
-                                        getViewState().showToast(R.string.cookes_baza_knig_exeption);
-                                    }
-                                } else if (e.getClass() == NullPointerException.class) {
-                                    isEnd = true;
-                                } else {
-                                    getViewState().showToast(R.string.error_load_data);
-                                    page--;
-                                }
-                                onComplete();
-
-                            }
-
-                            @Override
-                            public void onNext(@NotNull ArrayList<BookPOJO> bookPOJOS) {
-                                if (isRefreshing) {
-                                    books.clear();
-                                }
-                                books.addAll(bookPOJOS);
-                                if (isRefreshing) {
-                                    isRefreshing = false;
-                                    getViewState().showDataBooks(books);
-                                    getViewState().setPosition(0);
-                                }
-                            }
-
-                            @Override
-                            public void onSubscribe(@NotNull Disposable d) {
-                            }
-
-                            @Override
-                            public void onComplete() {
-                                Log.d(TAG, "onComplete");
+    private void getData(int page) {
+        if (isLoading) {
+            return;
+        }
+        isLoading = true;
+        String url = pageUrl(page);
+        if (mModelId == Consts.MODEL_BOOKS) {
+            mDisposables.add(mModelBook.getBooks(url, page, mSubTitle.trim(), mContext.getApplicationContext())
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(result -> onPage(page, result, mBookCursor, () -> {
+                                books = mBookCursor.items();
                                 getViewState().showDataBooks(books);
-                                getViewState().showProgres(false);
-                                getViewState().showRefreshing(false);
-                                isLoading = false;
-                            }
-                        });
-            } else {
-                mModelGenre.getBooks(url, page)
-                        .subscribeOn(Schedulers.io())
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(new Observer<ArrayList<GenrePOJO>>() {
-                            @Override
-                            public void onError(@NotNull Throwable e) {
-                                if (e.getClass() == CookesExeption.class) {
-                                    if (String.valueOf(e.getMessage()).contains(Url.SERVER_BAZA_KNIG)) {
-                                        getViewState().showToast(R.string.cookes_baza_knig_exeption);
-                                    }
-                                } else if (e.getClass() == NullPointerException.class) {
-                                    isEnd = true;
-                                } else {
-                                    getViewState().showToast(R.string.error_load_data);
-                                    page--;
-                                }
-                                onComplete();
-
-                            }
-
-                            @Override
-                            public void onNext(@NotNull ArrayList<GenrePOJO> bookPOJOS) {
-                                if (isRefreshing) {
-                                    genre.clear();
-                                }
-                                genre.addAll(bookPOJOS);
-                                if (isRefreshing) {
-                                    isRefreshing = false;
-                                    getViewState().showDataGenres(genre);
-                                    getViewState().setPosition(0);
-                                }
-                            }
-
-                            @Override
-                            public void onSubscribe(@NotNull Disposable d) {
-                            }
-
-                            @Override
-                            public void onComplete() {
-                                Log.d(TAG, "onComplete");
+                            }),
+                            e -> onPage(page, ProviderPage.<BookPOJO>failed(e), mBookCursor, null)));
+        } else {
+            mDisposables.add(mModelGenre.getBooks(url, page)
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(result -> onPage(page, result, mGenreCursor, () -> {
+                                genre = mGenreCursor.items();
                                 getViewState().showDataGenres(genre);
-                                getViewState().showProgres(false);
-                                getViewState().showRefreshing(false);
-                                isLoading = false;
-                            }
-                        });
+                            }),
+                            e -> onPage(page, ProviderPage.<GenrePOJO>failed(e), mGenreCursor, null)));
+        }
+    }
+
+    /**
+     * Applies one page: a failure (of a refresh too) keeps cursor and list and re-asks the same page next
+     * time; a success moves the cursor, page 1 replacing the list and its dedupe set ({@link ListingCursor}).
+     */
+    private <T> void onPage(int page, ProviderPage<T> result, ListingCursor<T> cursor, Runnable show) {
+        try {
+            if (result.isFailure()) {
+                if (result.status == ProviderPage.Status.BLOCKED && mUrl.contains(Url.SERVER_BAZA_KNIG)) {
+                    getViewState().showToast(R.string.cookes_baza_knig_exeption);
+                } else {
+                    getViewState().showToast(R.string.error_load_data);
+                }
+                return;
             }
+            cursor.apply(page, result);
+            show.run();
+            if (isRefreshing) {
+                getViewState().setPosition(0);
+            }
+        } finally {
+            isLoading = false;
+            isRefreshing = false;
+            getViewState().showProgres(false);
+            getViewState().showRefreshing(false);
         }
     }
 

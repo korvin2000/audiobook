@@ -3,8 +3,6 @@ package com.fanok.audiobooks.fragment;
 import static android.content.Context.UI_MODE_SERVICE;
 import static android.os.Build.VERSION.SDK_INT;
 import static android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS;
-import static com.fanok.audiobooks.Consts.PROXY_PASSWORD;
-import static com.fanok.audiobooks.Consts.PROXY_USERNAME;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -22,7 +20,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.PowerManager;
 import android.provider.SearchRecentSuggestions;
-import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
 import android.widget.TextView;
@@ -32,10 +29,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
-import androidx.media3.exoplayer.offline.DownloadService;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
 import androidx.preference.MultiSelectListPreference;
@@ -44,7 +39,7 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
-import com.fanok.audiobooks.App;
+import com.fanok.audiobooks.AppThemes;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.MySuggestionProvider;
 import com.fanok.audiobooks.R;
@@ -57,8 +52,8 @@ import com.fanok.audiobooks.model.AudioDBModel;
 import com.fanok.audiobooks.model.AudioListDBModel;
 import com.fanok.audiobooks.model.BooksDBModel;
 import com.fanok.audiobooks.pojo.BackupPOJO;
+import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
-import com.fanok.audiobooks.service.ExoDownloadService;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
 import com.google.android.material.navigation.NavigationView;
 import com.google.gson.Gson;
@@ -70,8 +65,6 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -97,19 +90,18 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     Context context = getContext();
                     if (context == null) return;
                     new Thread(() -> {
-                        boolean success = false;
+                        int skipped = -1;
                         try (java.io.OutputStream os = context.getContentResolver().openOutputStream(uri)) {
                             if (os != null) {
-                                success = performBackupToStream(context, os);
+                                skipped = performBackupToStream(context, os);
                             }
                         } catch (Exception e) {
                             Log.e("SettingsFragment", "Error writing backup to URI", e);
                         }
-                        boolean finalSuccess = success;
+                        int finalSkipped = skipped;
                         if (getActivity() != null) {
                             getActivity().runOnUiThread(() -> {
-                                Toast.makeText(getContext(),
-                                        finalSuccess ? getString(R.string.backup_created) : getString(R.string.backup_not_created),
+                                Toast.makeText(getContext(), backupResultMessage(finalSkipped),
                                         Toast.LENGTH_SHORT).show();
                             });
                         }
@@ -158,11 +150,10 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             if (context != null) {
                 new Thread(() -> {
                     String path = DownloadStorageHelper.getDownloadPath(context);
-                    String filePath = backup(path);
+                    int skipped = backup(context, path);
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
-                            Toast.makeText(getContext(),
-                                    filePath != null ? getString(R.string.backup_created) : getString(R.string.backup_not_created),
+                            Toast.makeText(getContext(), backupResultMessage(skipped),
                                     Toast.LENGTH_SHORT).show();
                         });
                     }
@@ -196,20 +187,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     .commit();
         }
     }
-
-
-    private final ActivityResultLauncher<Intent> manageStorageLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    if (Environment.isExternalStorageManager()) {
-                        showAllert(requireContext(), R.string.confirm_restore, restoreClickListnere);
-                    } else {
-                        Toast.makeText(requireContext(), getString(R.string.worning_not_allowed_read_storege),
-                                Toast.LENGTH_SHORT).show();
-                    }
-                }
-            });
 
 
     @Override
@@ -270,61 +247,16 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 false);
         initSummary(getPreferenceScreen());
 
-        preferenceChangeListner("pref_proxy",
-                (preference, newValue) -> {
-                    App.useProxy = (boolean) newValue;
-                    if((boolean)newValue){
-                        Authenticator authenticator = new Authenticator() {
-                            public PasswordAuthentication getPasswordAuthentication() {
-                                return (new PasswordAuthentication(PROXY_USERNAME,
-                                        PROXY_PASSWORD.toCharArray()));
-                            }
-                        };
-                        Authenticator.setDefault(authenticator);
-                    }
-
-                    return true;
-                });
-
-        /*preferenceChangeListner("pref_proxy",
-                (preference, newValue) -> {
-                    if(!validateIP((String) newValue)){
-                        Toast.makeText(preference.getContext(), R.string
-                        .incorect_fomat_proxy_server, Toast.LENGTH_LONG).show();
-                        return false;
-                    }else return true;
-                });
-
-        preferenceChangeListner("pref_proxy_prot", new Preference.OnPreferenceChangeListener() {
-            @Override
-            public boolean onPreferenceChange(Preference preference, Object newValue) {
-                if(!validatePORT((String) newValue)){
-                    Toast.makeText(preference.getContext(), R.string.incorect_fomat_port, Toast
-                    .LENGTH_LONG).show();
-                    return false;
-                }else return true;
-            }
-        });
-
-        preferenceChangeListner("proxy_enabled", (preference, newValue) -> {
-            setProxy((Boolean) newValue);
-            return true;
-        });
-
-        SharedPreferences pref = PreferenceManager
-                .getDefaultSharedPreferences(requireContext());
-        setProxy(pref.getBoolean("proxy_enabled", false));
-
-*/
-
         preferenceChangeListner("pref_theme", (preference, newValue) -> {
-            if (newValue.equals(getString(R.string.theme_dark_value)) || newValue
-                    .equals(getString(R.string.theme_black_value))) {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-            } else {
-                AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-            }
-            requireActivity().recreate();
+            // the value is stored after this returns; apply night mode and restart once it is
+            Context context = requireContext().getApplicationContext();
+            requireActivity().getWindow().getDecorView().post(() -> {
+                AppThemes.applyNightMode(context);
+                if (getActivity() != null) {
+                    // dark and black share a night mode, so the restart is not implied
+                    getActivity().recreate();
+                }
+            });
             return true;
         });
 
@@ -350,47 +282,58 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
             return true;
         });
 
+        // database work on the storage worker, never on the main thread (DATA-07)
         preferenceClickListner("clear_history", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_history,
-                    (dialogInterface, i) -> {
-                        BooksDBModel booksDBModel = new BooksDBModel(preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        BooksDBModel booksDBModel = new BooksDBModel(app);
                         booksDBModel.clearHistory();
                         booksDBModel.closeDB();
-                        AudioDBModel audioDBModel = new AudioDBModel(preference.getContext());
+                        AudioDBModel audioDBModel = new AudioDBModel(app);
                         audioDBModel.clearAll();
                         audioDBModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_favorite", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_favorite,
-                    (dialogInterface, i) -> {
-                        BooksDBModel dbModel = new BooksDBModel(
-                                preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        BooksDBModel dbModel = new BooksDBModel(app);
                         dbModel.clearFavorite();
                         dbModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_audio_list", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_audio_list,
-                    (dialogInterface, i) -> {
-                        AudioListDBModel dbModel = new AudioListDBModel(
-                                preference.getContext());
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        AudioListDBModel dbModel = new AudioListDBModel(app);
                         dbModel.clearAll();
                         dbModel.closeDB();
-                    });
+                    }));
             return true;
         });
 
         preferenceClickListner("clear_savind", preference -> {
+            final Context app = preference.getContext().getApplicationContext();
             showAllert(preference.getContext(), R.string.confirm_clear_saved,
-                    (dialogInterface, i) -> {
-                        DownloadService.sendRemoveAllDownloads(
-                                requireContext(), ExoDownloadService.class, false);
-                    });
+                    (dialogInterface, i) -> DownloadStorageHelper.submit(() -> {
+                        // every saved book: rows and recorded copies; imported books lose rows only
+                        BooksDBModel dbModel = new BooksDBModel(app);
+                        List<String> urls = new ArrayList<>();
+                        for (BookPOJO book : dbModel.getAllSaved()) {
+                            if (book.getUrl() != null) {
+                                urls.add(book.getUrl());
+                            }
+                        }
+                        dbModel.closeDB();
+                        DownloadStorageHelper.removeBooks(app, urls);
+                    }));
             return true;
         });
 
@@ -496,21 +439,7 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         Context context = getContext();
         if (context == null) return;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-            try {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-                intent.addCategory("android.intent.category.DEFAULT");
-                intent.setData(Uri.parse(String.format("package:%s", requireContext().getPackageName())));
-                manageStoragePermissionOnlyLauncher.launch(intent);
-                return;
-            } catch (Exception e) {
-                try {
-                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
-                    manageStoragePermissionOnlyLauncher.launch(intent);
-                    return;
-                } catch (Exception ignored) {}
-            }
-        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 101);
@@ -527,7 +456,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 }
             } else if (which == 1) {
                 DownloadStorageHelper.resetToDefault(context);
-                App.getInstance().reinitDownloadManagerAsync();
                 Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                 if (pref != null) {
                     pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -557,7 +485,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                             dir.mkdirs();
                         }
                         DownloadStorageHelper.saveDownloadPath(context, selected.path);
-                        App.getInstance().reinitDownloadManagerAsync();
                         Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                         if (pref != null) {
                             pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -586,7 +513,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                             dir.mkdirs();
                         }
                         DownloadStorageHelper.saveDownloadPath(context, path);
-                        App.getInstance().reinitDownloadManagerAsync();
                         Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                         if (pref != null) {
                             pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -607,7 +533,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                         Context context = getContext();
                         if (context != null) {
                             DownloadStorageHelper.saveDownloadUri(context.getApplicationContext(), result.getData());
-                            App.getInstance().reinitDownloadManagerAsync();
                             Preference pref = findPreference(DownloadStorageHelper.PREF_DOWNLOAD_PATH);
                             if (pref != null) {
                                 pref.setSummary(DownloadStorageHelper.getDownloadPath(context));
@@ -619,10 +544,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     e.printStackTrace();
                 }
             });
-
-    private final ActivityResultLauncher<Intent> manageStoragePermissionOnlyLauncher = registerForActivityResult(
-            new ActivityResultContracts.StartActivityForResult(),
-            result -> DownloadStorageHelper.openFolderPicker(folderPickerLauncher));
 
     @Override
     public void onPermissionsGranted(int requestCode, @NonNull List<String> perms) {
@@ -637,32 +558,43 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         updatePrefSummary(findPreference(key));
     }
 
-    private boolean performBackupToStream(Context context, java.io.OutputStream os) {
+    /** Writes a backup; returns the number of unreadable rows left out, or -1 when nothing was written. */
+    private int performBackupToStream(Context context, java.io.OutputStream os) {
         try {
-            BackupPOJO backup = new BackupPOJO();
-            BooksDBModel booksDBModel = new BooksDBModel(context);
-            AudioDBModel audioDBModel = new AudioDBModel(context);
-            AudioListDBModel audioListDBModel = new AudioListDBModel(context);
-
-            backup.setBooksFavorite(booksDBModel.getAllFavorite());
-            backup.setBooksHistory(booksDBModel.getAllHistory());
-            backup.setAudio(audioDBModel.getAll());
-            backup.setAudioList(audioListDBModel.getAll());
-
-            booksDBModel.closeDB();
-            audioDBModel.closeDB();
-            audioListDBModel.closeDB();
-
+            BackupPOJO backup = createBackup(context);
             Gson gson = new GsonBuilder().create();
             try (java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(os, java.nio.charset.StandardCharsets.UTF_8)) {
                 writer.write(gson.toJson(backup));
                 writer.flush();
             }
-            return true;
+            return backup.getSkippedRows();
         } catch (Exception e) {
             Log.e("SettingsFragment", "Backup error", e);
-            return false;
+            return -1;
         }
+    }
+
+    /** Every table restore reads, plus the format version; rows that cannot be read are skipped and counted. */
+    private static BackupPOJO createBackup(Context context) {
+        BooksDBModel booksDBModel = new BooksDBModel(context);
+        AudioDBModel audioDBModel = new AudioDBModel(context);
+        AudioListDBModel audioListDBModel = new AudioListDBModel(context);
+        BackupPOJO backup = new BackupPOJO();
+        backup.setBooksFavorite(booksDBModel.getAllFavorite());
+        backup.setBooksHistory(booksDBModel.getAllHistory());
+        backup.setBooksSaved(booksDBModel.getAllSaved());
+        backup.setAudio(audioDBModel.getAll());
+        backup.setAudioList(audioListDBModel.getAll());
+        backup.setSkippedRows(booksDBModel.getSkippedRows() + audioDBModel.getSkippedRows());
+        if (backup.getSkippedRows() > 0) {
+            Log.w("SettingsFragment", "Backup left out " + backup.getSkippedRows() + " unreadable rows");
+        }
+        return backup;
+    }
+
+    private String backupResultMessage(int skipped) {
+        if (skipped > 0) return getString(R.string.backup_created_skipped, skipped);
+        return getString(skipped == 0 ? R.string.backup_created : R.string.backup_not_created);
     }
 
     private boolean performRestoreFromStream(Context context, java.io.InputStream is) {
@@ -674,22 +606,16 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     sb.append(line).append("\n");
                 }
             }
-            return restore(sb.toString());
+            return restore(context, sb.toString());
         } catch (Exception e) {
             Log.e("SettingsFragment", "Restore error", e);
             return false;
         }
     }
 
-    private String backup(@NotNull String dir) {
-        BackupPOJO backup = new BackupPOJO();
-        BooksDBModel booksDBModel = new BooksDBModel(getContext());
-        AudioDBModel audioDBModel = new AudioDBModel(getContext());
-        AudioListDBModel audioListDBModel = new AudioListDBModel(getContext());
-        backup.setBooksFavorite(booksDBModel.getAllFavorite());
-        backup.setBooksHistory(booksDBModel.getAllHistory());
-        backup.setAudio(audioDBModel.getAll());
-        backup.setAudioList(audioListDBModel.getAll());
+    /** Returns the number of unreadable rows left out of the written file, or -1 when nothing was written. */
+    private int backup(@NotNull Context context, @NotNull String dir) {
+        BackupPOJO backup = createBackup(context);
         GsonBuilder builder = new GsonBuilder();
         Gson gson = builder.create();
         FileWriter writer;
@@ -699,9 +625,6 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                 Locale.forLanguageTag("UK"));
 
         String name = dir + "/" + formatForDateNow.format(dateNow) + ".json";
-
-        booksDBModel.closeDB();
-        audioDBModel.closeDB();
 
         try {
             File targetDir = new File(dir);
@@ -726,14 +649,14 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                         writer = new FileWriter(name);
                         writer.write(gson.toJson(backup));
                         writer.close();
-                        return name;
+                        return backup.getSkippedRows();
                     }
                 }
             } catch (Exception ignored) {}
-            return null;
+            return -1;
         }
 
-        return name;
+        return backup.getSkippedRows();
     }
 
     private void initSummary(Preference p) {
@@ -783,51 +706,67 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
         return myData.toString();
     }
 
-    private boolean restore(@NotNull String file) {
-        BooksDBModel booksDBModel = new BooksDBModel(getContext());
-        AudioDBModel audioDBModel = new AudioDBModel(getContext());
-        AudioListDBModel audioListDBModel = new AudioListDBModel(getContext());
-        boolean returnValue = true;
+    /**
+     * Validates the whole document first, then replaces every table it carries in one transaction, so a bad
+     * file or a failed write leaves the database as it was. A table whose collection is absent is not touched.
+     */
+    private boolean restore(@NotNull Context context, @NotNull String file) {
+        final BackupPOJO backup;
         try {
-            Gson gson = new Gson();
-            BackupPOJO backup = gson.fromJson(file, BackupPOJO.class);
-            booksDBModel.clearFavorite();
-            if (backup.getBooksFavorite() != null) {
-                for (int i = 0; i < backup.getBooksFavorite().size(); i++) {
-                    booksDBModel.addFavorite(backup.getBooksFavorite().get(
-                            backup.getBooksFavorite().size() - 1 - i));
-                }
-            }
-
-            booksDBModel.clearHistory();
-            if (backup.getBooksHistory() != null) {
-                for (int i = 0; i < backup.getBooksHistory().size(); i++) {
-                    booksDBModel.addHistory(
-                            backup.getBooksHistory().get(backup.getBooksHistory().size() - 1 - i));
-                }
-            }
-
-            audioDBModel.clearAll();
-            if (backup.getAudio() != null) {
-                for (int i = 0; i < backup.getAudio().size(); i++) {
-                    audioDBModel.add(backup.getAudio().get(backup.getAudio().size() - 1 - i));
-                }
-            }
-
-            audioListDBModel.clearAll();
-            if (backup.getAudioList() != null) {
-                for (int i = 0; i < backup.getAudioList().size(); i++) {
-                    audioListDBModel.add(backup.getAudioList().get(i));
-                }
-            }
-
-
-        } catch (Exception e) {
-            returnValue = false;
+            backup = BackupPOJO.parse(file);
+        } catch (BackupPOJO.InvalidBackupException e) {
+            Log.w("SettingsFragment", "Backup rejected", e);
+            return false;
         }
-        audioDBModel.closeDB();
-        booksDBModel.closeDB();
-        return returnValue;
+        BooksDBModel booksDBModel = new BooksDBModel(context);
+        AudioDBModel audioDBModel = new AudioDBModel(context);
+        AudioListDBModel audioListDBModel = new AudioListDBModel(context);
+        com.fanok.audiobooks.room.AppDatabase database = booksDBModel.getDatabase();
+        try {
+            database.runInTransaction(() -> {
+                if (backup.getBooksFavorite() != null) {
+                    database.favoriteDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksFavorite().size(); i++) {
+                        booksDBModel.addFavorite(backup.getBooksFavorite().get(
+                                backup.getBooksFavorite().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getBooksHistory() != null) {
+                    database.historyDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksHistory().size(); i++) {
+                        booksDBModel.addHistory(
+                                backup.getBooksHistory().get(backup.getBooksHistory().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getBooksSaved() != null) {
+                    database.savedDao().deleteAll();
+                    for (int i = 0; i < backup.getBooksSaved().size(); i++) {
+                        booksDBModel.addSaved(
+                                backup.getBooksSaved().get(backup.getBooksSaved().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getAudio() != null) {
+                    database.audioDao().deleteAll();
+                    for (int i = 0; i < backup.getAudio().size(); i++) {
+                        audioDBModel.add(backup.getAudio().get(backup.getAudio().size() - 1 - i));
+                    }
+                }
+
+                if (backup.getAudioList() != null) {
+                    audioListDBModel.clearAll();
+                    for (int i = 0; i < backup.getAudioList().size(); i++) {
+                        audioListDBModel.add(backup.getAudioList().get(i));
+                    }
+                }
+            });
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("SettingsFragment", "Restore failed, database left unchanged", e);
+            return false;
+        }
     }
 
     private void showAllert(@NotNull Context context, int message,
@@ -882,39 +821,5 @@ public class SettingsFragment extends PreferenceFragmentCompat implements
                     Toast.LENGTH_SHORT).show();
         }
     }
-
-    /*private void setProxy(boolean value){
-        Preference preferenceProxy = findPreference("pref_proxy");
-        if(preferenceProxy!=null){
-            if(value){
-                preferenceProxy.setEnabled(true);
-            }else {
-                preferenceProxy.setEnabled(false);
-            }
-        }
-
-        Preference preferencePort = findPreference("pref_proxy_prot");
-        if(preferencePort!=null){
-            if(value){
-                preferencePort.setEnabled(true);
-            }else {
-                preferencePort.setEnabled(false);
-            }
-        }
-    }
-
-
-    private boolean validateIP(@NonNull String ip) {
-        if (ip.isEmpty()) return true;
-        Matcher matcher = Consts.REGEXP_IP.matcher(ip);
-        return matcher.find();
-    }
-
-    private boolean validatePORT(@NonNull String port) {
-        if (port.isEmpty()) return true;
-        Matcher matcher = Consts.REGEXP_PORT.matcher(port);
-        return matcher.find();
-    }*/
-
 
 }

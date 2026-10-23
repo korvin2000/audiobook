@@ -1,5 +1,10 @@
 package com.fanok.audiobooks;
 
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
 public class Url {
     public static final String SERVER = "https://knigavuhe.org";
     public static final String INDEX = SERVER + "/new/?page=";
@@ -94,5 +99,54 @@ public class Url {
     public static final String SECTIONS_POLEKNIG = SERVER_POLEKNIG + "/genres";
     public static final String NEW_BOOK_POLEKNIG = SERVER_POLEKNIG + "/books/novelties?p=";
     public static final String BEST_POLEKNIG = SERVER_POLEKNIG + "/books/popular?p=";
+
+    /** Hosts the providers used earlier → host they use now (data, not code: extend when a site moves). */
+    private static final Map<String, String> HOST_ALIASES = new HashMap<>();
+
+    static {
+        HOST_ALIASES.put("baza-knig.ink", "baza-knig.top");
+        HOST_ALIASES.put("izibuk.ru", "izib.uk");
+        HOST_ALIASES.put("audioboo.ru", "audioboo.org");
+        HOST_ALIASES.put("m.knigavuhe.org", "knigavuhe.org");
+        HOST_ALIASES.put("pda.izibuk.ru", "izib.uk");
+    }
+
+    /** Lower-case host of {@code url} without a leading {@code www.}; empty when unparsable. */
+    public static String hostOf(String url) {
+        if (url == null) {
+            return "";
+        }
+        try {
+            String host = URI.create(url.trim()).getHost();
+            if (host == null) {
+                return "";
+            }
+            host = host.toLowerCase(Locale.ROOT);
+            return host.startsWith("www.") ? host.substring(4) : host;
+        } catch (IllegalArgumentException e) {
+            return "";
+        }
+    }
+
+    /** True when {@code url} is served by {@code server} (a {@code SERVER_*} constant or any URL); compares parsed hosts. */
+    public static boolean isHost(String url, String server) {
+        String host = hostOf(url);
+        return !host.isEmpty() && host.equals(hostOf(server));
+    }
+
+    /** Rewrites a URL on a host that has since moved to the current host; other URLs are returned unchanged. */
+    public static String canonical(String url) {
+        String host = hostOf(url);
+        String current = HOST_ALIASES.get(host);
+        if (current == null) {
+            return url;
+        }
+        URI uri = URI.create(url.trim());
+        String www = uri.getHost().toLowerCase(Locale.ROOT).startsWith("www.") ? "www." : "";
+        String authority = (uri.getRawUserInfo() != null ? uri.getRawUserInfo() + "@" : "") + www + current
+                + (uri.getPort() >= 0 ? ":" + uri.getPort() : "");
+        return url.trim().replaceFirst(java.util.regex.Pattern.quote(uri.getRawAuthority()), authority)
+                .replaceFirst("^(?i)http://", "https://");
+    }
 
 }
