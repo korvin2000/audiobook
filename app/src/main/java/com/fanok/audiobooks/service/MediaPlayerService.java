@@ -37,9 +37,13 @@ import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
+import android.media.AudioManager;
 import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
 import android.media.audiofx.PresetReverb;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Build.VERSION;
@@ -48,6 +52,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.support.v4.media.MediaBrowserCompat;
 import android.support.v4.media.MediaBrowserCompat.MediaItem;
@@ -57,6 +62,7 @@ import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
@@ -110,12 +116,14 @@ import com.squareup.picasso.Target;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jsoup.HttpStatusException;
 
 /**
  * Plays one book. The user's intent ({@link #wantPlaying}) is changed only by the commands {@link #play()},
@@ -157,6 +165,17 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private static final int FAST_FORWARD = 30000;
     private static final long PROGRESS_INTERVAL_MS = 500;
     private static final long CHECKPOINT_INTERVAL_MS = 10_000;
+    /** How long the retry wake lock outlasts the delay of the retry it keeps on time. */
+    private static final long RETRY_WAKE_MARGIN_MS = 20_000;
+    /** The retry wake lock while a chapter list refresh is fetched (a few page loads, 10 s timeout each). */
+    private static final long REFRESH_WAKE_MS = 60_000;
+    /** The retry wake lock after the retry ran, until the player holds its own locks for the load. */
+    private static final long HANDOVER_WAKE_MS = 5_000;
+    /** A retry that comes during a call waits this long and looks again: focus would be refused. */
+    private static final long CALL_RECHECK_MS = 3_000;
+    /** A transient audio focus loss longer than this, outside a call, is taken as a pause. */
+    private static final long FOCUS_LOSS_LIMIT_MS = 30 * 60_000L;
+    private static final long FOCUS_LOSS_RECHECK_MS = 60_000;
 
     private static final long SESSION_ACTIONS = PlaybackStateCompat.ACTION_PLAY
             | PlaybackStateCompat.ACTION_PAUSE
@@ -215,6 +234,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     /** Generation of the newest queued legacy write per kind and book; an older one queued before it is stale. */
     private final ConcurrentHashMap<String, Integer> legacyWrites = new ConcurrentHashMap<>();
     private final PlaybackErrorPolicy errorPolicy = new PlaybackErrorPolicy();
+    private final PatientLoadErrorPolicy loadErrorPolicy = new PatientLoadErrorPolicy(() -> this.wantPlaying);
     private final DefaultExtractorsFactory extractorsFactory =
             new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
 
@@ -243,7 +263,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private String artworkFailedUrl;
 
     // the state machine
-    private boolean wantPlaying;
+    /** The user's intent; volatile because the load policy reads it on the playback thread. */
+    private volatile boolean wantPlaying;
     private int gen;
     /** The chapter's source is being resolved on the executor. */
     private boolean resolving;
@@ -258,6 +279,15 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private Runnable retryTask;
     @Nullable
     private Disposable refreshTask;
+    /** Keeps a pending retry or refresh on time with the screen off: in IDLE the player holds no lock. */
+    @Nullable
+    private PowerManager.WakeLock retryWakeLock;
+    @Nullable
+    private ConnectivityManager.NetworkCallback networkCallback;
+    /** The player gave up while playing: Next and Previous play the chapter they load. Any other command clears it. */
+    private boolean resumeOnSkip;
+    /** elapsedRealtime when a transient audio focus loss silenced the player, -1 while it is not silenced. */
+    private long suppressedSince = -1;
     /** elapsedRealtime of the pause, 0 for "long ago" (a freshly loaded book), -1 while not paused. */
     private long pausedAt = -1;
     private long lastCheckpointAt;
@@ -360,6 +390,19 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         }
 
         @Override
+        public void onPlaybackSuppressionReasonChanged(int playbackSuppressionReason) {
+            //another app's transient focus silences the player: the controls offer Play, which asks for it back
+            handler.removeCallbacks(focusLossWatchdog);
+            if (playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
+                suppressedSince = SystemClock.elapsedRealtime();
+                handler.postDelayed(focusLossWatchdog, FOCUS_LOSS_LIMIT_MS);
+            } else {
+                suppressedSince = -1;
+            }
+            publishState();
+        }
+
+        @Override
         public void onPlayerError(@NonNull PlaybackException error) {
             handleError(error);
         }
@@ -383,6 +426,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
 
     private final Runnable notifyTask = this::postNotification;
 
+    private final Runnable focusLossWatchdog = this::onLongFocusLoss;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -394,6 +439,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         initMediaSession();
         initPlayer();
         registerCommandReceiver();
+        registerNetworkCallback();
         publishState();
     }
 
@@ -410,6 +456,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             sleepTimer = null;
         }
         SleepTimerPresenter.setTimerStarted(false);
+        unregisterNetworkCallback();
         cancelRetry();
         handler.removeCallbacksAndMessages(null);
         cancelArtwork();
@@ -541,6 +588,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
 
     /** Plays the loaded book; after an error re-prepares the chapter, after the end replays the book. */
     public void play() {
+        resumeOnSkip = false;
         wantPlaying = true;
         if (player == null) {
             return;
@@ -570,23 +618,38 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         pausedAt = -1;
         if (!resolving && state == Player.STATE_IDLE) {
             //after an error, or a retry still waiting: the user asked to try now
-            cancelRetry();
-            errorPolicy.reset();
-            failedKind = null;
-            if (player.getMediaItemCount() == 0) {
-                //the chapter never loaded (invalid clip, unresolved source): load it again, never another one
-                loadChapter(chapterIndex, startPositionMs, false);
-                return;
-            }
-            player.prepare();
+            retryNow(true);
+            publishState();
+            return;
         }
+        //also while another app's transient focus silences the player: asking again takes the focus back
         player.setPlayWhenReady(true);
         publishState();
+    }
+
+    /**
+     * Re-prepares the failed chapter now, at the position the player keeps. Only the user's Play restores the
+     * error budget; an automatic retry goes on spending it.
+     */
+    private void retryNow(boolean byUser) {
+        cancelRetry();
+        failedKind = null;
+        if (byUser) {
+            errorPolicy.reset();
+        }
+        if (player.getMediaItemCount() == 0) {
+            //the chapter never loaded (invalid clip, unresolved source): load it again, never another one
+            loadChapter(chapterIndex, startPositionMs, false);
+            return;
+        }
+        player.prepare();
+        player.setPlayWhenReady(true);
     }
 
     /** Pauses in every state; pending retries and source resolution can no longer start audio. */
     public void pause() {
         //also before the book or the player exists: a pending restore or resolution reads this when it lands
+        resumeOnSkip = false;
         wantPlaying = false;
         cancelRetry();
         if (pausedAt < 0) {
@@ -599,9 +662,12 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         publishState();
     }
 
-    /** The only toggling command: decided by the intent, not by what the engine is doing. */
+    /**
+     * The only toggling command: decided by the intent, not by what the engine is doing. A player silenced by
+     * another app's transient audio focus shows Play, so the press plays (takes the focus back).
+     */
     public void toggle() {
-        if (wantPlaying) {
+        if (wantPlaying && !isFocusSuppressed()) {
             pause();
         } else {
             play();
@@ -665,7 +731,17 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     /** The next chapter with the current intent; skips a chapter that failed. */
     public void next() {
         if (player != null && hasBook() && chapterIndex < chapters.size() - 1) {
+            resumeAfterGiveUp();
             loadChapter(chapterIndex + 1, 0, true);
+        }
+    }
+
+    /** Skipping the chapter that made the player give up goes on playing, as it would have without the error. */
+    private void resumeAfterGiveUp() {
+        if (resumeOnSkip) {
+            resumeOnSkip = false;
+            wantPlaying = true;
+            pausedAt = -1;
         }
     }
 
@@ -675,6 +751,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             return;
         }
         if (chapterIndex > 0) {
+            resumeAfterGiveUp();
             loadChapter(chapterIndex - 1, 0, true);
         } else {
             seekTo(0);
@@ -686,6 +763,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (player == null || !hasBook() || index < 0 || index >= chapters.size()) {
             return;
         }
+        resumeOnSkip = false;
         wantPlaying = play;
         pausedAt = play ? -1 : 0;
         loadChapter(index, 0, true);
@@ -694,6 +772,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     /** Ends playback: checkpoint, release the media, remove the notification, stop the service. */
     public void stop() {
         wantPlaying = false;
+        resumeOnSkip = false;
         cancelRetry();
         gen++;
         //on disk before the book's identity goes: onDestroy has nothing left to snapshot
@@ -781,6 +860,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             imageUrl = photo;
             image = null;
         }
+        resumeOnSkip = false;
         wantPlaying = request.play;
         long position = request.positionMs;
         if (request.play) {
@@ -837,6 +917,11 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (!PlaybackErrorPolicy.isValidClip(audio.getTimeStart(), audio.getTimeFinish())) {
             resolving = false;
             failedKind = PlaybackErrorPolicy.Kind.CONTENT;
+            if (wantPlaying) {
+                //nothing can play: the controls must offer Play (and Next), not a pause that does nothing
+                giveUp("invalid clip", -1, null);
+                return;
+            }
             publishState();
             return;
         }
@@ -866,6 +951,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         resolving = false;
         if (playback == null) {
             failedKind = PlaybackErrorPolicy.Kind.OTHER;
+            if (wantPlaying) {
+                giveUp("no source", -1, hostOf(audio.getUrl()));
+                return;
+            }
             publishState();
             return;
         }
@@ -879,8 +968,15 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                     .setStartPositionMs(audio.getTimeStart() * 1000L)
                     .setEndPositionMs(audio.getTimeFinish() * 1000L)
                     .build());
+        } else if (audio.getTimeStart() > 0) {
+            //the open-ended last chapter of a shared stream plays from its start to the end of the stream
+            item.setClippingConfiguration(new ClippingConfiguration.Builder()
+                    .setStartPositionMs(audio.getTimeStart() * 1000L)
+                    .setEndPositionMs(C.TIME_END_OF_SOURCE)
+                    .build());
         }
         MediaSource mediaSource = new DefaultMediaSourceFactory(dataSourceFactory, extractorsFactory)
+                .setLoadErrorHandlingPolicy(loadErrorPolicy)
                 .createMediaSource(item.build());
         player.setMediaSource(mediaSource, startPositionMs);
         player.setPlayWhenReady(wantPlaying);
@@ -933,6 +1029,11 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                 if (restored != null && !ParentalControl.isAllowed(app, restored)) {
                     //a blocked book is never started by a command: the book screen asks for the PIN first
                     wantPlaying = false;
+                    if (resolving && hasBook()) {
+                        //this request dropped the loaded chapter's resolution: resolve it again, paused
+                        loadChapter(chapterIndex, startPositionMs, false);
+                        return;
+                    }
                     publishState();
                     return;
                 }
@@ -942,6 +1043,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                     } else if (resolving) {
                         //this request dropped the loaded chapter's resolution: resolve it again
                         loadChapter(chapterIndex, startPositionMs, false);
+                    } else if (wantPlaying && player.getPlaybackState() == Player.STATE_IDLE) {
+                        //the unknown book is ignored; this request dropped the loaded one's pending retry: retry now
+                        play();
                     } else {
                         //the unknown book is ignored; the loaded one follows the intent the request set
                         player.setPlayWhenReady(wantPlaying);
@@ -1034,12 +1138,18 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         Log.w(TAG, "onPlayerError: " + error.getErrorCodeName(), error);
         cancelRetry();
         checkpointNow(false);
-        PlaybackErrorPolicy.Decision decision = errorPolicy.onError(error.errorCode, httpStatusOf(error));
+        int status = httpStatusOf(error);
+        PlaybackErrorPolicy.Decision decision =
+                errorPolicy.onError(error.errorCode, status, SystemClock.elapsedRealtime());
         failedKind = decision.kind;
         if (wantPlaying && decision.action == PlaybackErrorPolicy.Action.RETRY) {
             scheduleRetry(decision.delayMs);
         } else if (wantPlaying && decision.action == PlaybackErrorPolicy.Action.REFRESH && ordinals == null) {
             refreshChapters();
+        } else if (wantPlaying) {
+            //FAIL, or a refused address of offline copies, which no fresh chapter list can replace
+            giveUp(error.getErrorCodeName(), status, hostOf(error));
+            return;
         }
         publishState();
     }
@@ -1053,7 +1163,39 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         return -1;
     }
 
-    /** Re-prepares the chapter at the checkpoint position (the player keeps it) unless the intent changed. */
+    /** The host the failed request went to, else the chapter's: never a path or a query, which may be signed. */
+    @Nullable
+    private String hostOf(@NonNull Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof HttpDataSource.HttpDataSourceException) {
+                return ((HttpDataSource.HttpDataSourceException) t).dataSpec.uri.getHost();
+            }
+        }
+        return hasBook() ? hostOf(chapters.get(chapterIndex).getUrl()) : null;
+    }
+
+    @Nullable
+    private static String hostOf(@Nullable String url) {
+        return url != null ? Uri.parse(url).getHost() : null;
+    }
+
+    /**
+     * The policy stopped trying: the intent goes, so the app's button, the notification and the headset button
+     * offer Play, and one press of it retries with a full budget. The error stays published until then.
+     */
+    private void giveUp(@NonNull String what, int httpStatus, @Nullable String host) {
+        //the code, the status and the host only: chapter addresses carry signatures, some carry credentials
+        Log.w(TAG, "giving up: " + what + " status=" + httpStatus + " host=" + host);
+        pause();
+        resumeOnSkip = true;
+        Toast.makeText(getApplicationContext(), getString(errorMessage()), Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * Re-prepares the chapter at the checkpoint position (the player keeps it) after {@code delayMs} unless the
+     * intent changed, kept on time by the retry wake lock. During a call it looks again a little later without
+     * spending the budget: the focus would be refused, and the refusal taken as a pause.
+     */
     private void scheduleRetry(long delayMs) {
         final int generation = gen;
         retryTask = new Runnable() {
@@ -1062,38 +1204,87 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                 if (retryTask != this) {
                     return;
                 }
-                retryTask = null;
-                if (generation == gen && player != null && wantPlaying) {
-                    player.prepare();
+                if (generation != gen || player == null || !wantPlaying) {
+                    retryTask = null;
+                    releaseRetryWakeLock();
+                    publishState();
+                    return;
                 }
+                if (isInCall() && !errorPolicy.isExpired(SystemClock.elapsedRealtime())) {
+                    handler.removeCallbacks(this);
+                    holdRetryWakeLock(CALL_RECHECK_MS + RETRY_WAKE_MARGIN_MS);
+                    handler.postDelayed(this, CALL_RECHECK_MS);
+                    return;
+                }
+                retryTask = null;
+                if (isInCall() || isOtherAudioActive()) {
+                    //a call outlasted the retries, or the user listens to something else now: never take the focus
+                    giveUp(isInCall() ? "call outlasted the retries" : "another app plays", -1, null);
+                    return;
+                }
+                retryNow(false);
+                //the player takes its own locks on its own thread
+                holdRetryWakeLock(HANDOVER_WAKE_MS);
                 publishState();
             }
         };
+        holdRetryWakeLock(delayMs + RETRY_WAKE_MARGIN_MS);
         handler.postDelayed(retryTask, delayMs);
     }
 
-    /** The chapter address was refused: fetch the chapter list once more, quietly, and retry with it. */
+    /**
+     * The chapter address was refused: fetch the chapter list once more, quietly, and retry with it. A fetch that
+     * fails is retried like network trouble; a list that no longer matches the book gives up.
+     */
     private void refreshChapters() {
         final int generation = gen;
         final String url = bookUrl;
         final int index = chapterIndex;
         final int count = chapters.size();
-        final long position = player.getCurrentPosition();
+        holdRetryWakeLock(REFRESH_WAKE_MS);
         refreshTask = new AudioModel(getApplicationContext()).getAudio(url)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(fresh -> {
                     refreshTask = null;
-                    if (generation != gen || !wantPlaying || !hasBook() || fresh.size() != count) {
+                    releaseRetryWakeLock();
+                    if (generation != gen || !wantPlaying || !hasBook()) {
                         publishState();
                         return;
                     }
+                    if (fresh.size() != count) {
+                        //the book changed on the site: the checkpoint's chapter may be another one now
+                        giveUp("refresh: " + fresh.size() + " chapters, not " + count, -1, hostOf(url));
+                        return;
+                    }
                     chapters = new ArrayList<>(fresh);
-                    loadChapter(index, position, false);
+                    //where the chapter is now: a seek during the fetch moved the idle player
+                    loadChapter(index, currentPositionMs(), false);
+                    holdRetryWakeLock(HANDOVER_WAKE_MS);
                 }, e -> {
                     refreshTask = null;
+                    releaseRetryWakeLock();
                     Log.w(TAG, "chapter list refresh failed", e);
-                    publishState();
+                    if (generation != gen || !wantPlaying || !hasBook()) {
+                        publishState();
+                        return;
+                    }
+                    int status = e instanceof HttpStatusException ? ((HttpStatusException) e).getStatusCode() : -1;
+                    if (!PlaybackErrorPolicy.isRetryableRefreshError(e instanceof IOException, status)) {
+                        //a challenge, a changed page, a book the site removed: asking again will not help
+                        failedKind = PlaybackErrorPolicy.Kind.OTHER;
+                        giveUp("refresh: " + e.getClass().getSimpleName(), status, hostOf(url));
+                        return;
+                    }
+                    PlaybackErrorPolicy.Decision decision =
+                            errorPolicy.onRefreshFailed(SystemClock.elapsedRealtime());
+                    failedKind = decision.kind;
+                    if (decision.action == PlaybackErrorPolicy.Action.RETRY) {
+                        scheduleRetry(decision.delayMs);
+                        publishState();
+                    } else {
+                        giveUp("refresh: " + e.getClass().getSimpleName(), -1, hostOf(url));
+                    }
                 });
     }
 
@@ -1106,6 +1297,132 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             refreshTask.dispose();
             refreshTask = null;
         }
+        releaseRetryWakeLock();
+    }
+
+    /** (Re)arms the retry wake lock for {@code timeoutMs}; it is not reference counted. */
+    private void holdRetryWakeLock(long timeoutMs) {
+        try {
+            if (retryWakeLock == null) {
+                PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (power == null) {
+                    return;
+                }
+                retryWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "audiobooks:retry");
+                retryWakeLock.setReferenceCounted(false);
+            }
+            retryWakeLock.acquire(timeoutMs);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "cannot hold the retry wake lock", e);
+        }
+    }
+
+    private void releaseRetryWakeLock() {
+        if (retryWakeLock != null && retryWakeLock.isHeld()) {
+            try {
+                retryWakeLock.release();
+            } catch (RuntimeException e) {
+                Log.w(TAG, "cannot release the retry wake lock", e);
+            }
+        }
+    }
+
+    /** A call rings or is in progress: audio focus requests are refused until it ends. */
+    private boolean isInCall() {
+        int mode = audioMode();
+        return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
+                || mode == AudioManager.MODE_RINGTONE
+                || VERSION.SDK_INT >= VERSION_CODES.R && mode == AudioManager.MODE_CALL_SCREENING;
+    }
+
+    /** Some app plays music now; this player is idle while it retries, so it is another one. */
+    private boolean isOtherAudioActive() {
+        AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        return audio != null && audio.isMusicActive();
+    }
+
+    private int audioMode() {
+        AudioManager audio = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        return audio != null ? audio.getMode() : AudioManager.MODE_NORMAL;
+    }
+
+    /** A network coming up (registering reports the current one at once) runs a pending retry now. */
+    private void registerNetworkCallback() {
+        ConnectivityManager connectivity = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivity == null) {
+            return;
+        }
+        ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(@NonNull Network network) {
+                //called on a connectivity thread
+                handler.post(MediaPlayerService.this::onNetworkAvailable);
+            }
+        };
+        try {
+            connectivity.registerDefaultNetworkCallback(callback);
+            networkCallback = callback;
+        } catch (RuntimeException e) {
+            //SecurityException without the permission, TooManyRequestsException past the platform's limit
+            Log.w(TAG, "cannot watch the network", e);
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (networkCallback == null) {
+            return;
+        }
+        ConnectivityManager connectivity = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        try {
+            if (connectivity != null) {
+                connectivity.unregisterNetworkCallback(networkCallback);
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "network callback was not registered", e);
+        }
+        networkCallback = null;
+    }
+
+    /**
+     * Retries after network trouble now instead of after the backoff. Only a retry that is still pending: once the
+     * policy gave up, nothing resumes without the user.
+     */
+    private void onNetworkAvailable() {
+        Runnable pending = retryTask;
+        if (player != null && wantPlaying && failedKind == PlaybackErrorPolicy.Kind.TRANSIENT && pending != null) {
+            //the retry keeps its own guards: generation, intent, a call in progress
+            handler.removeCallbacks(pending);
+            pending.run();
+        }
+    }
+
+    /** Another app's transient audio focus holds the player silent while it would play. */
+    private boolean isFocusSuppressed() {
+        return player != null && player.getPlaybackSuppressionReason()
+                == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS;
+    }
+
+    /** What the play/pause controls show: Pause while the book plays or is on its way, else Play. */
+    private boolean showsPause() {
+        return wantPlaying && !isFocusSuppressed();
+    }
+
+    /**
+     * Another app took the audio focus "for a moment" half an hour ago and never gave it back (ExoPlayer issue
+     * #7182): outside a call the player stops waiting and is paused as of when it went silent.
+     */
+    private void onLongFocusLoss() {
+        if (!wantPlaying || !isFocusSuppressed() || suppressedSince < 0) {
+            return;
+        }
+        if (audioMode() != AudioManager.MODE_NORMAL) {
+            //a call: the focus comes back when it ends
+            handler.postDelayed(focusLossWatchdog, FOCUS_LOSS_RECHECK_MS);
+            return;
+        }
+        long since = suppressedSince;
+        pause();
+        pausedAt = since;
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -1182,7 +1499,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         if (mediaSession != null) {
             mediaSession.setPlaybackState(buildPlaybackState());
         }
-        int icon = wantPlaying ? R.drawable.ic_pause : R.drawable.ic_play;
+        int icon = showsPause() ? R.drawable.ic_pause : R.drawable.ic_play;
         if (icon != shownIcon) {
             shownIcon = icon;
             sendPlayIcon();
@@ -1293,7 +1610,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     }
 
     private void sendPlayIcon() {
-        sendInternal(new Intent(Broadcast_SET_IMAGE).putExtra("id", wantPlaying ? R.drawable.ic_pause : R.drawable.ic_play));
+        sendInternal(new Intent(Broadcast_SET_IMAGE).putExtra("id", showsPause() ? R.drawable.ic_pause : R.drawable.ic_play));
     }
 
     private void sendProgress() {
@@ -1400,11 +1717,11 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                     .setOngoing(true)
                     .build();
         }
-        boolean showPause = wantPlaying;
+        boolean showPause = showsPause();
         builder.setContentTitle(chapters.get(chapterIndex).getName())
                 .setContentText(isShowingError() ? getString(errorMessage()) : bookName())
                 .setLargeIcon(image)
-                .setOngoing(showPause)
+                .setOngoing(wantPlaying)
                 .setContentIntent(contentIntent)
                 .setDeleteIntent(PendingIntent.getBroadcast(getApplicationContext(), 0,
                         new Intent(this, OnCancelBroadcastReceiver.class), PendingIntent.FLAG_IMMUTABLE))
