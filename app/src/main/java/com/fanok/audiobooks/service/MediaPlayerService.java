@@ -930,6 +930,12 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                     return;
                 }
                 restoring = false;
+                if (restored != null && !ParentalControl.isAllowed(app, restored)) {
+                    //a blocked book is never started by a command: the book screen asks for the PIN first
+                    wantPlaying = false;
+                    publishState();
+                    return;
+                }
                 if (list.isEmpty()) {
                     if (!hasBook()) {
                         stop();

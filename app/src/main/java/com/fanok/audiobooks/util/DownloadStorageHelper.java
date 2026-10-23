@@ -1148,6 +1148,12 @@ public class DownloadStorageHelper {
                 keptIds.addAll(own);
             }
         }
+        // Another saved entry of the same book under another URL (alias) owns the same ids: never remove those.
+        for (java.util.Map.Entry<String, List<BooksAudioEntity>> alias : model.getAliasRows(bookUrl).entrySet()) {
+            for (DownloadIds.Entry entry : DownloadUtil.entriesOf(alias.getKey(), alias.getValue())) {
+                keptIds.addAll(DownloadUtil.idsOf(entry));
+            }
+        }
         List<String> roots = downloadRoots(context);
         DeletionPlanner.Plan plan = DeletionPlanner.plan(planRows, roots, keepOnlineRows,
                 DownloadStorageHelper::downloadIdOf, keptIds);

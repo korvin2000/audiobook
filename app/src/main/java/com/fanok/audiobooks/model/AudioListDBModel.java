@@ -38,6 +38,8 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
         entity.time = audioListPOJO.getTime();
         entity.timeStart = audioListPOJO.getTimeStart();
         entity.timeEnd = audioListPOJO.getTimeEnd();
+        entity.localUri = audioListPOJO.getLocalUri();
+        entity.ordinal = audioListPOJO.getOrdinal();
         getDatabase().booksAudioDao().insert(entity);
     }
 
@@ -84,9 +86,15 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
         getDatabase().runInTransaction(() -> {
             List<BooksAudioEntity> old = dao.getByBookUrl(urlBook);
             boolean[] used = new boolean[old.size()];
+            // Exact remote URL first (so get.php?file=1 and ?file=2 stay apart); the same path with a changed token
+            // (download id) only when the name agrees, so a copy never moves to a different chapter.
+            Map<String, ArrayDeque<Integer>> byUrl = new HashMap<>();
             Map<String, ArrayDeque<Integer>> byId = new HashMap<>();
             for (int j = 0; j < old.size(); j++) {
                 String url = old.get(j).urlAudio;
+                if (url == null) continue;
+                if (!byUrl.containsKey(url)) byUrl.put(url, new ArrayDeque<>());
+                byUrl.get(url).add(j);
                 if (DeletionPlanner.isRemote(url)) {
                     String id = DownloadStorageHelper.downloadIdOf(url);
                     if (!byId.containsKey(id)) byId.put(id, new ArrayDeque<>());
@@ -96,18 +104,11 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
             BooksAudioEntity[] match = new BooksAudioEntity[chapters.size()];
             for (int i = 0; i < chapters.size(); i++) {
                 String url = chapters.get(i).getAudioUrl();
-                ArrayDeque<Integer> same = DeletionPlanner.isRemote(url) ? byId.get(DownloadStorageHelper.downloadIdOf(url)) : null;
-                if (same != null && !same.isEmpty()) {
-                    // Several chapters may share one URL (HLS): prefer the row with the same name, else the next one.
-                    Integer j = null;
-                    for (Integer k : same) {
-                        if (sameName(old.get(k), chapters.get(i))) {
-                            j = k;
-                            break;
-                        }
-                    }
-                    if (j == null) j = same.peek();
-                    same.remove(j);
+                Integer j = url == null ? null : pick(byUrl.get(url), old, chapters.get(i), used, false);
+                if (j == null && DeletionPlanner.isRemote(url)) {
+                    j = pick(byId.get(DownloadStorageHelper.downloadIdOf(url)), old, chapters.get(i), used, true);
+                }
+                if (j != null) {
                     match[i] = old.get(j);
                     used[j] = true;
                 }
@@ -153,8 +154,36 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
         return -id - 1;
     }
 
+    /** The first unused candidate with the chapter's name; else the first unused one unless a name is required. */
+    private static Integer pick(ArrayDeque<Integer> candidates, List<BooksAudioEntity> old, AudioListPOJO chapter,
+                                boolean[] used, boolean requireName) {
+        if (candidates == null) return null;
+        Integer first = null;
+        for (Integer k : candidates) {
+            if (used[k]) continue;
+            if (sameName(old.get(k), chapter)) return k;
+            if (first == null) first = k;
+        }
+        return requireName ? null : first;
+    }
+
     private static boolean sameName(BooksAudioEntity row, AudioListPOJO chapter) {
         return row.nameAudio != null && row.nameAudio.equals(chapter.getAudioName());
+    }
+
+    /**
+     * Chapter rows of OTHER entries that are the same book under another URL (trailing slash, moved host): they share
+     * download ids ({@link com.fanok.audiobooks.download.DownloadIds#bookKey}), so a deletion must keep what they own.
+     */
+    public Map<String, List<BooksAudioEntity>> getAliasRows(@NonNull String urlBook) {
+        String key = com.fanok.audiobooks.download.DownloadIds.bookKey(urlBook);
+        Map<String, List<BooksAudioEntity>> byUrl = new HashMap<>();
+        for (BooksAudioEntity row : getDatabase().booksAudioDao().getAll()) {
+            if (row.urlBook.equals(urlBook) || !key.equals(com.fanok.audiobooks.download.DownloadIds.bookKey(row.urlBook))) continue;
+            if (!byUrl.containsKey(row.urlBook)) byUrl.put(row.urlBook, new ArrayList<>());
+            byUrl.get(row.urlBook).add(row);
+        }
+        return byUrl;
     }
 
     @Override
@@ -175,6 +204,8 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
             audio.setTime(entity.time);
             audio.setTimeStart(entity.timeStart);
             audio.setTimeEnd(entity.timeEnd);
+            audio.setLocalUri(entity.localUri);
+            audio.setOrdinal(entity.ordinal);
             list.add(audio);
         }
         return list;
@@ -201,6 +232,8 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
             audio.setTime(entity.time);
             audio.setTimeStart(entity.timeStart);
             audio.setTimeEnd(entity.timeEnd);
+            audio.setLocalUri(entity.localUri);
+            audio.setOrdinal(entity.ordinal);
         }
         return audio;
     }
@@ -218,6 +251,8 @@ public class AudioListDBModel extends BooksDBAbstract implements AudioListDBHelp
             audio.setTime(entity.time);
             audio.setTimeStart(entity.timeStart);
             audio.setTimeEnd(entity.timeEnd);
+            audio.setLocalUri(entity.localUri);
+            audio.setOrdinal(entity.ordinal);
             list.add(audio);
         }
         return list;

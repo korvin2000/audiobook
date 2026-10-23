@@ -6,6 +6,7 @@ import androidx.annotation.NonNull;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
+import com.fanok.audiobooks.net.SiteHttp;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -50,13 +51,10 @@ public class ImportModel {
     }
 
     private boolean importBooks(SingleEmitter<?> emitter) throws IOException {
-        Document document = Jsoup.connect(getUserUrl() + "fav/")
+        Document document = SiteHttp.parse(SiteHttp.execute(SiteHttp.connect(getUserUrl() + "fav/")
                 .cookies(getCookiesAuth())
-                .userAgent(Consts.USER_AGENT)
-                .sslSocketFactory(Consts.socketFactory())
                 .referrer(getUserUrl())
-                .maxBodySize(0)
-                .get();
+                ));
         Element booksListParent = document.getElementById("books_list");
         if (booksListParent != null) {
             Elements booksList = booksListParent.getElementsByClass("books_carousel");
@@ -152,13 +150,10 @@ public class ImportModel {
         Set<String> urls = new LinkedHashSet<>();
         int page = 1;
         for (; page <= MAX_PAGES && !emitter.isDisposed(); page++) {
-            Document document = Jsoup.connect(getUserUrl() + "/books/page" + page + "/")
+            Document document = SiteHttp.parse(SiteHttp.execute(SiteHttp.connect(getUserUrl() + "/books/page" + page + "/")
                     .cookies(getCookiesAuth())
-                    .userAgent(Consts.USER_AGENT)
-                    .sslSocketFactory(Consts.socketFactory())
                     .referrer(Url.SERVER_AKNIGA)
-                    .maxBodySize(0)
-                    .get();
+                    ));
 
             Elements listElements = document.getElementsByClass("content__main__articles--item");
             if (listElements != null && listElements.size() != 0) {
@@ -197,18 +192,15 @@ public class ImportModel {
         if (getCookies() == null || getToken() == null) {
             setCookes();
         }
-        Connection.Response res = Jsoup.connect(Url.SERVER + "/login/")
+        Connection.Response res = SiteHttp.execute(SiteHttp.connect(Url.SERVER + "/login/")
                 .cookies(getCookies())
                 .data("email", username)
                 .data("password", password)
                 .data("token", getToken())
                 .method(Connection.Method.POST)
-                .sslSocketFactory(Consts.socketFactory())
                 .ignoreContentType(true)
-                .userAgent(Consts.USER_AGENT)
                 .referrer(Url.SERVER + "/login/")
-                .maxBodySize(0)
-                .execute();
+                );
         if (res.url().toString().contains("error")) {
             return false;
         } else {
@@ -237,7 +229,7 @@ public class ImportModel {
             setCookesAbook();
         }
 
-        Connection.Response res = Jsoup.connect(Url.SERVER_AKNIGA + "/auth/ajax-login")
+        Connection.Response res = SiteHttp.execute(SiteHttp.connect(Url.SERVER_AKNIGA + "/auth/ajax-login")
                 .cookies(getCookies())
                 .data("login", username)
                 .data("password", password)
@@ -245,13 +237,10 @@ public class ImportModel {
                 .data("remember", "1")
                 .data("return-path", Url.SERVER_AKNIGA + "/")
                 .method(Connection.Method.POST)
-                .sslSocketFactory(Consts.socketFactory())
                 .ignoreContentType(true)
                 .followRedirects(true)
-                .userAgent(Consts.USER_AGENT)
                 .referrer(Url.SERVER_AKNIGA)
-                .maxBodySize(0)
-                .execute();
+                );
 
         String json = res.body();
 
@@ -264,13 +253,10 @@ public class ImportModel {
                     return false;
                 } else {
                     cookiesAuth = res.cookies();
-                    Document document = Jsoup.connect(Url.SERVER_AKNIGA)
-                            .userAgent(Consts.USER_AGENT)
+                    Document document = SiteHttp.parse(SiteHttp.execute(SiteHttp.connect(Url.SERVER_AKNIGA)
                             .referrer("http://www.google.com")
-                            .sslSocketFactory(Consts.socketFactory())
                             .cookies(cookiesAuth)
-                            .maxBodySize(0)
-                            .get();
+                            ));
                     Elements elements = document.getElementsByClass("menu__user--wrapper--wrapper");
                     if (elements != null && elements.size() != 0) {
                         Element a = elements.first().child(2);
@@ -289,13 +275,10 @@ public class ImportModel {
     }
 
     private void setCookes() throws IOException {
-        Connection.Response res = Jsoup.connect(Url.SERVER + "/login/")
+        Connection.Response res = SiteHttp.execute(SiteHttp.connect(Url.SERVER + "/login/")
                 .method(Connection.Method.GET)
-                .userAgent(Consts.USER_AGENT)
                 .referrer(Url.SERVER)
-                .sslSocketFactory(Consts.socketFactory())
-                .maxBodySize(0)
-                .execute();
+                );
         Document doc = res.parse();
         cookies = res.cookies();
         Element form = doc.selectFirst("form[name='login_form']>input[name='token']");
@@ -306,13 +289,10 @@ public class ImportModel {
     }
 
     private void setCookesAbook() throws IOException {
-        Connection.Response res = Jsoup.connect(Url.SERVER_AKNIGA)
+        Connection.Response res = SiteHttp.execute(SiteHttp.connect(Url.SERVER_AKNIGA)
                 .method(Connection.Method.GET)
-                .userAgent(Consts.USER_AGENT)
                 .referrer("https://www.google.com.ua/")
-                .sslSocketFactory(Consts.socketFactory())
-                .maxBodySize(0)
-                .execute();
+                );
         Document doc = res.parse();
         cookies = res.cookies();
         Elements sriptTag = doc.getElementsByTag("script");

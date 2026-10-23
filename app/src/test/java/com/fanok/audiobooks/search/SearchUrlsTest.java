@@ -60,7 +60,10 @@ public class SearchUrlsTest {
                     for (int page : PAGES) {
                         String url = SearchUrls.url(provider, category, query, page);
                         if (url == null) {
-                            continue; // unsupported combination: skipped with a status, never routed elsewhere
+                            // unsupported combination: skipped with a status, never routed elsewhere; every provider
+                            // supports book search, so a null there is a regression, not a gap
+                            assertNotEquals(provider + " lost its book search", Category.BOOKS, category);
+                            continue;
                         }
                         String where = provider + "/" + category + " q=" + query + " p=" + page + " -> " + url;
                         assertNotNull(where, HttpUrl.parse(url));
