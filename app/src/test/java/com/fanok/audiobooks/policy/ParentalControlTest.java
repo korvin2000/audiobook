@@ -83,6 +83,65 @@ public class ParentalControlTest {
     }
 
     @Test
+    public void conflictingLegacyAliasesMigrateToDeny() {
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        store.putBoolean(ParentalControl.ENABLED, true);
+        store.putBoolean("https://baza-knig.ink/fantastika/page/", true);
+        store.putBoolean("https://baza-knig.top/fantastika/page/", false);
+        BookPOJO fantastika = book("https://baza-knig.top/book/1.html", "https://baza-knig.top/fantastika/");
+
+        assertTrue(ParentalControl.allowedIds(store).isEmpty());
+        assertFalse(ParentalControl.isAllowed(store, fantastika));
+        assertEquals(Boolean.FALSE, store.all().get("baza-knig.top|/fantastika"));
+        assertEquals(2, store.all().size());
+    }
+
+    @Test
+    public void legacyAllowCannotOverrideCanonicalDeny() {
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        store.putBoolean(ParentalControl.ENABLED, true);
+        store.putBoolean("knigavuhe.org|/genre/uzhasy", false);
+        store.putBoolean("https://knigavuhe.org/genre/uzhasy/<page>/", true);
+
+        assertFalse(ParentalControl.isAllowed(store,
+                book("https://knigavuhe.org/book/z/", "https://knigavuhe.org/genre/uzhasy/")));
+        assertEquals(Boolean.FALSE, store.all().get("knigavuhe.org|/genre/uzhasy"));
+        assertFalse(store.all().containsKey("https://knigavuhe.org/genre/uzhasy/<page>/"));
+    }
+
+    @Test
+    public void sameCategoryPathOnTwoProvidersIsTwoIds() {
+        String audioboo = ParentalControl.categoryId("https://audioboo.org/b/1", "https://audioboo.org/fantastika/page/");
+        String baza = ParentalControl.categoryId("https://baza-knig.top/b/1", "https://baza-knig.top/fantastika/page/");
+        assertEquals("audioboo.org|/fantastika", audioboo);
+        assertEquals("baza-knig.top|/fantastika", baza);
+
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        store.putBoolean(ParentalControl.ENABLED, true);
+        ParentalControl.setCategoryAllowed(store, "https://audioboo.org/fantastika/page/", true);
+        assertTrue(ParentalControl.isAllowed(store, book("https://audioboo.org/b/1", "https://audioboo.org/fantastika/")));
+        assertFalse(ParentalControl.isAllowed(store,
+                book("https://baza-knig.top/b/1", "https://baza-knig.top/fantastika/")));
+    }
+
+    @Test
+    public void versionGrowsOnlyWhenSwitchOrAllowListChanges() {
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        assertEquals(0, ParentalControl.version(store));
+        ParentalControl.setEnabled(store, true);
+        assertEquals(1, ParentalControl.version(store));
+        ParentalControl.setEnabled(store, true);
+        assertEquals(1, ParentalControl.version(store));
+        ParentalControl.setCategoryAllowed(store, "https://knigavuhe.org/genre/detskie/<page>/", true);
+        ParentalControl.setCategoryAllowed(store, "https://knigavuhe.org/genre/detskie/", true);
+        assertEquals(2, ParentalControl.version(store));
+        ParentalControl.setCategoryAllowed(store, "https://knigavuhe.org/genre/detskie/", false);
+        ParentalControl.setEnabled(store, false);
+        assertEquals(4, ParentalControl.version(store));
+        assertTrue(ParentalControl.allowedIds(store).isEmpty());
+    }
+
+    @Test
     public void hashedPinVerifiesAndLockoutDoubles() {
         ParentalControl.MapStore store = new ParentalControl.MapStore();
         ParentalControl.setPin(store, "1234");
@@ -126,5 +185,28 @@ public class ParentalControlTest {
         assertTrue(store.all().containsKey(ParentalControl.PIN_HASH));
         assertEquals(ParentalControl.Result.OK, ParentalControl.verifyPin(store, "4321", 0).result);
         assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "1111", 0).result);
+    }
+
+    @Test
+    public void legacyZeroPinAcceptsZerosAndRejectsEmpty() {
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        store.putInt(ParentalControl.LEGACY_PIN, 0);
+        assertTrue(ParentalControl.hasPin(store));
+        assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "", 0).result);
+        assertTrue(store.all().containsKey(ParentalControl.LEGACY_PIN));
+        assertEquals(ParentalControl.Result.OK, ParentalControl.verifyPin(store, "0000", 0).result);
+        assertFalse(store.all().containsKey(ParentalControl.LEGACY_PIN));
+        // once hashed, the PIN is the exact string that was entered
+        assertEquals(ParentalControl.Result.OK, ParentalControl.verifyPin(store, "0000", 0).result);
+        assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "", 0).result);
+        assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "0", 0).result);
+    }
+
+    @Test
+    public void emptyStoreHasNoPinAndRejectsEveryEntry() {
+        ParentalControl.MapStore store = new ParentalControl.MapStore();
+        assertFalse(ParentalControl.hasPin(store));
+        assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "", 0).result);
+        assertEquals(ParentalControl.Result.WRONG, ParentalControl.verifyPin(store, "0000", 0).result);
     }
 }

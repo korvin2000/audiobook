@@ -114,7 +114,7 @@ public class ParentalControlActivity extends MvpAppCompatActivity implements
         parentalControl.setOnCheckedChangeListener(
                 (compoundButton, b) -> {
                     mAddapter.setEnabled(b);
-                    mStore.putBoolean(ParentalControl.ENABLED, b);
+                    ParentalControl.setEnabled(mStore, b);
                 });
         parentalControl.setOnClickListener(view -> {
             if (parentalControl.isChecked()) {

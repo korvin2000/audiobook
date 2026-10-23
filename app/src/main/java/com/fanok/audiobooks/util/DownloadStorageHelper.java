@@ -10,8 +10,10 @@ import android.provider.DocumentsContract;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.OptIn;
 import androidx.preference.PreferenceManager;
 import androidx.documentfile.provider.DocumentFile;
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.cache.Cache;
 import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadIndex;
@@ -123,7 +125,9 @@ public class DownloadStorageHelper {
         if (uri == null) return;
 
         try {
-            int takeFlags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            int granted = data.getFlags();
+            int takeFlags = ((granted & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0 ? Intent.FLAG_GRANT_READ_URI_PERMISSION : 0)
+                    | ((granted & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0 ? Intent.FLAG_GRANT_WRITE_URI_PERMISSION : 0);
             if (takeFlags != 0) {
                 context.getContentResolver().takePersistableUriPermission(uri, takeFlags);
             }
@@ -509,9 +513,9 @@ public class DownloadStorageHelper {
 
         try {
             String docId = null;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && DocumentsContract.isTreeUri(uri)) {
+            if (DocumentsContract.isTreeUri(uri)) {
                 docId = DocumentsContract.getTreeDocumentId(uri);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && DocumentsContract.isDocumentUri(context, uri)) {
+            } else if (DocumentsContract.isDocumentUri(context, uri)) {
                 docId = DocumentsContract.getDocumentId(uri);
             }
 
@@ -1228,7 +1232,9 @@ public class DownloadStorageHelper {
      * one in a state but removing (queued, downloading, stopped, failed or completed) that this deletion did not
      * remove keeps them, so a pending download never loses its chapter row.
      */
-    static boolean stillNeeded(@NonNull java.util.Map<String, Integer> downloads, @NonNull Set<String> removedIds) {
+    @OptIn(markerClass = UnstableApi.class)
+    static boolean stillNeeded(
+@NonNull java.util.Map<String, Integer> downloads, @NonNull Set<String> removedIds) {
         for (java.util.Map.Entry<String, Integer> d : downloads.entrySet()) {
             if (d.getValue() != Download.STATE_REMOVING && !removedIds.contains(d.getKey())) return true;
         }

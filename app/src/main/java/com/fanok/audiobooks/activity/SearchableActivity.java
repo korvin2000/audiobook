@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.provider.SearchRecentSuggestions;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -29,7 +30,6 @@ import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.arellomobile.mvp.presenter.ProvidePresenter;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.GridSpacingItemDecoration;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.MySuggestionProvider;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.Url;
@@ -286,7 +286,8 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
     }
 
     private void handleIntent(Intent intent) {
-        if (intent != null && binding != null && Intent.ACTION_SEARCH.equals(intent.getAction())) {
+        if (intent != null && binding != null && (Intent.ACTION_SEARCH.equals(intent.getAction())
+                || MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH.equals(intent.getAction()))) {
             String query = intent.getStringExtra(SearchManager.QUERY);
             if (query != null) {
                 SearchRecentSuggestions suggestions = new SearchRecentSuggestions(this,
@@ -510,11 +511,6 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
         int spacing = (int) getResources().getDimension(R.dimen.recycler_item_margin);
         boolean includeEdge = true;
         binding.list.addItemDecoration(new GridSpacingItemDecoration(count, spacing, includeEdge));
-    }
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
     }
 
     @Override

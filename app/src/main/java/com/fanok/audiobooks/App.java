@@ -3,9 +3,7 @@ package com.fanok.audiobooks;
 import android.os.StrictMode;
 import androidx.annotation.OptIn;
 import android.app.Application;
-import android.content.Context;
 import android.content.SharedPreferences;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.database.StandaloneDatabaseProvider;
 import androidx.media3.datasource.cache.NoOpCacheEvictor;
@@ -34,8 +32,6 @@ import java.util.concurrent.Executors;
 @OptIn(markerClass = UnstableApi.class)
 public class App extends Application {
 
-    // proxy removed; call sites deleted in Phase 1
-    public static final boolean useProxy = false;
     /** Name of the Media3 download store below the app-specific files directory. */
     static final String DOWNLOAD_CACHE_DIR = "media3_downloads";
     private static final String PREF_DOWNLOAD_CACHE_DIR = "media3_download_cache_dir";
@@ -51,15 +47,6 @@ public class App extends Application {
     private static final MemoryCookieJar COOKIE_JAR = new MemoryCookieJar();
 
     private static App instance;
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        SharedPreferences pref = PreferenceManager
-                .getDefaultSharedPreferences(base);
-
-        String lang = pref.getString("pref_lang", "ru");
-        super.attachBaseContext(LocaleManager.onAttach(base, lang));
-    }
 
     public static File getCrashFile() {
         return new java.io.File(getInstance().getFilesDir(), "crash.txt");
@@ -249,14 +236,7 @@ public class App extends Application {
         SharedPreferences pref = PreferenceManager
                 .getDefaultSharedPreferences(this);
 
-        String themeName = pref.getString("pref_theme", getString(R.string.theme_dark_value));
-        if (themeName.equals(getString(R.string.theme_dark_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-        } else if (themeName.equals(getString(R.string.theme_light_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
-        } else if (themeName.equals(getString(R.string.theme_black_value))) {
-            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-        }
+        AppThemes.applyNightMode(this);
 
         Consts.setBazaKnigCookies(pref.getString("cookes_baza_knig", ""));
 

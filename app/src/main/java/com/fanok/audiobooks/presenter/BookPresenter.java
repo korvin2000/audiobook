@@ -20,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AlertDialog;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
@@ -51,10 +52,6 @@ import com.fanok.audiobooks.service.PlaybackSettings;
 import com.fanok.audiobooks.util.DownloadUtil;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import io.reactivex.Observer;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
@@ -291,31 +288,6 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         mAudioListDBModel.closeDB();
         mBooksDBModel.closeDB();
         super.onDestroy();
-    }
-
-    @Override
-    public void addDecodeData(final String string) {
-        ArrayList<AudioPOJO> result = new ArrayList<>();
-        JsonElement jsonTree = JsonParser.parseString(string);
-        if (jsonTree.isJsonArray()) {
-            JsonArray jsonArray = jsonTree.getAsJsonArray();
-            for (JsonElement element : jsonArray) {
-                if (element.isJsonObject()) {
-                    AudioPOJO audioPOJO = new AudioPOJO();
-                    JsonObject jsonObject = element.getAsJsonObject();
-                    audioPOJO.setName(jsonObject.get("title").getAsString());
-                    audioPOJO.setUrl(jsonObject.get("file").getAsString());
-                    audioPOJO.setBookName(mBookPOJO.getName());
-                    result.add(audioPOJO);
-                }
-            }
-        }
-        mAudioPOJO = result;
-        mOrdinals = null;
-        getViewState().showData(mAudioPOJO, mBookPOJO.getUrl());
-        error = false;
-        onCompleteAudio();
-
     }
 
     private void onCompleteAudio() {
@@ -663,7 +635,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                 });
     }
 
-    @UnstableApi
+    @OptIn(markerClass = UnstableApi.class)
     private void loadOfflineLocalAudioSync() {
         ArrayList<AudioPOJO> localAudio = new ArrayList<>();
         ArrayList<Integer> localOrdinals = new ArrayList<>();

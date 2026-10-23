@@ -40,7 +40,6 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.arellomobile.mvp.MvpAppCompatActivity;
 import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.arellomobile.mvp.presenter.ProvidePresenter;
-import com.fanok.audiobooks.LocaleManager;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.adapter.DownloadAdapter;
 import com.fanok.audiobooks.databinding.ActivityClearSavedBinding;
@@ -93,11 +92,6 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
         return new ClearSavedPresenter(getApplicationContext());
     }
 
-
-    @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(LocaleManager.onAttach(base));
-    }
 
     @Override
     public Resources.Theme getTheme() {

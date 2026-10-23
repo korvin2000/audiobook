@@ -7,6 +7,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Drawable;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -27,6 +28,7 @@ import com.fanok.audiobooks.model.BooksModel;
 import com.fanok.audiobooks.model.GenreModel;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.search.ListingCursor;
 import com.fanok.audiobooks.search.ProviderPage;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -166,7 +168,11 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
         TextView artist = layout.findViewById(R.id.artist);
         TextView series = layout.findViewById(R.id.series);
 
-        if (books.get(position).getPhoto() != null) {
+        Drawable mask = ParentalControl.coverMask(view.getContext(), books.get(position));
+        if (mask != null) {
+            ImageView imageView = layout.findViewById(R.id.imageView);
+            imageView.setImageDrawable(mask);
+        } else if (books.get(position).getPhoto() != null) {
             ImageView imageView = layout.findViewById(R.id.imageView);
             Picasso.get()
                     .load(books.get(position).getPhoto())

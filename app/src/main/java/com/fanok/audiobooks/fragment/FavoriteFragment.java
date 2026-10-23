@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.TypedValue;
@@ -52,6 +53,7 @@ import com.fanok.audiobooks.adapter.BooksListAddapter;
 import com.fanok.audiobooks.databinding.FragmentFavoriteBinding;
 import com.fanok.audiobooks.interface_pacatge.favorite.FavoriteView;
 import com.fanok.audiobooks.pojo.BookPOJO;
+import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.presenter.FavoritePresenter;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.navigation.NavigationView;
@@ -72,6 +74,8 @@ public class FavoriteFragment extends MvpAppCompatFragment implements FavoriteVi
     FavoritePresenter mPresenter;
 
     private BooksListAddapter mAddapterBooks;
+    /** The parental-control version the visible covers were bound with. */
+    private long mParentalVersion;
 
     private int titleId;
 
@@ -449,11 +453,16 @@ public class FavoriteFragment extends MvpAppCompatFragment implements FavoriteVi
         TextView series = layout.findViewById(R.id.series);
 
         ImageView imageView = layout.findViewById(R.id.imageView);
-        Picasso.get()
-                .load(book.getPhoto())
-                .error(android.R.drawable.ic_menu_gallery)
-                .placeholder(android.R.drawable.ic_menu_gallery)
-                .into(imageView);
+        Drawable mask = ParentalControl.coverMask(imageView.getContext(), book);
+        if (mask != null) {
+            imageView.setImageDrawable(mask);
+        } else {
+            Picasso.get()
+                    .load(book.getPhoto())
+                    .error(android.R.drawable.ic_menu_gallery)
+                    .placeholder(android.R.drawable.ic_menu_gallery)
+                    .into(imageView);
+        }
 
         TextView title = layout.findViewById(R.id.title);
         title.setText(book.getName());
@@ -514,6 +523,11 @@ public class FavoriteFragment extends MvpAppCompatFragment implements FavoriteVi
     @Override
     public void onResume() {
         super.onResume();
+        long parentalVersion = ParentalControl.version(requireContext());
+        if (parentalVersion != mParentalVersion && mAddapterBooks != null) {
+            mAddapterBooks.refreshItem();
+        }
+        mParentalVersion = parentalVersion;
         MainActivity activity = (MainActivity) getActivity();
         if (activity != null) {
             NavigationView navigationView = activity.getNavigationView();
