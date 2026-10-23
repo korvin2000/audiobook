@@ -458,5 +458,7 @@
     <string name="cookies_site_summary">Пройти проверку сайта База Книг в браузере</string>
     <string name="downloads_summary">Скачанные книги и ход загрузок</string>
     <string name="cookies_not_verified">Сессия не подтверждена: прежняя сохранена</string>
+    <string name="proxy_title">Прокси</string>
+    <string name="proxy_summary">Встроенный прокси для сайтов, недоступных в вашей стране: страницы, аудио, скачивание и обложки</string>
     <string name="browser_not_found">Браузер не найден</string>
 </resources>
