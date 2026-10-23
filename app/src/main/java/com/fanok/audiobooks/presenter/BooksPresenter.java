@@ -142,12 +142,13 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
         if (Url.isHost(mUrl, Url.SERVER_AUDIOBOO)) {
             //the index, genres and the author, reader and series links of cards share one scheme
             return Url.audiobooListingPage(mUrl, page);
+        } else if (Url.isHost(mUrl, Url.SERVER_ABMP3)) {
+            return Url.abmp3ListingPage(mUrl, page);
         } else if (mUrl.contains(Url.SERVER_KNIGOBLUD)) {
             return mUrl.contains("?") ? mUrl + page : mUrl + "/" + page;
         } else if (mUrl.contains(Url.SERVER_OTRUB) || mUrl.contains(Url.SERVER_POLEKNIG)) {
             return mUrl.contains("?") ? mUrl + page : mUrl + "?p=" + page;
-        } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)
-                || mUrl.contains(Url.SERVER_BAZA_KNIG))
+        } else if ((!mUrl.contains("genre") || mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_BAZA_KNIG))
                 && !mUrl.contains(Url.SERVER_AKNIGA)) {
             return mUrl + page + "/";
         } else {

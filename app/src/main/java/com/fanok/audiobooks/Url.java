@@ -203,6 +203,22 @@ public class Url {
         return (page <= 1 ? base : base + "page/" + page + "/") + trimmed.substring(end);
     }
 
+    /**
+     * Page {@code page} of an audiobook-mp3 listing (the index, top, a genre, author, reader or the authors' list):
+     * the {@code page} query parameter only. The site answers {@code ?page=2/} with HTTP 500.
+     */
+    public static String abmp3ListingPage(String url, int page) {
+        okhttp3.HttpUrl parsed = okhttp3.HttpUrl.parse(url.trim());
+        if (parsed == null) {
+            return url;
+        }
+        okhttp3.HttpUrl.Builder builder = parsed.newBuilder().removeAllQueryParameters("page");
+        if (page > 1) {
+            builder.addQueryParameter("page", Integer.toString(page));
+        }
+        return builder.build().toString();
+    }
+
     /** Where the path of {@code url} ends: at its query or fragment, else at its end. */
     private static int pathEnd(String url) {
         int scheme = url.indexOf("://");

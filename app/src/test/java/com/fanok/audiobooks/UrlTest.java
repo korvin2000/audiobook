@@ -80,6 +80,22 @@ public class UrlTest {
     }
 
     @Test
+    public void abmp3ListingPagesAreOnlyAQueryParameter() {
+        // the site answers "?page=2/" with HTTP 500, and an author's "?page=1/" too
+        assertEquals("https://audiobook-mp3.com/", Url.abmp3ListingPage(Url.INDEX_ABMP3, 1));
+        assertEquals("https://audiobook-mp3.com/?page=2", Url.abmp3ListingPage(Url.INDEX_ABMP3, 2));
+        assertEquals("https://audiobook-mp3.com/avtor-573-x", Url.abmp3ListingPage(
+                Url.SERVER_ABMP3 + "/avtor-573-x?page=", 1));
+        assertEquals("https://audiobook-mp3.com/genre-20-uzhasy-mistika?page=3", Url.abmp3ListingPage(
+                Url.SERVER_ABMP3 + "/genre-20-uzhasy-mistika?page=", 3));
+        assertEquals("https://audiobook-mp3.com/top?page=2", Url.abmp3ListingPage(Url.ABMP3_TOP, 2));
+        assertEquals("https://audiobook-mp3.com/authors?page=4", Url.abmp3ListingPage(Url.AUTHORS_ABMP3, 4));
+        // a stale page value is replaced, other parameters stay
+        assertEquals("https://audiobook-mp3.com/x?sort=new&page=5",
+                Url.abmp3ListingPage(Url.SERVER_ABMP3 + "/x?page=2&sort=new", 5));
+    }
+
+    @Test
     public void withoutFirstPageDropsOnlyPageOne() {
         assertEquals("https://audioboo.org/", Url.withoutFirstPage("https://audioboo.org/page/1/"));
         assertEquals("https://audioboo.org/", Url.withoutFirstPage("https://audioboo.org/page/1"));
