@@ -5,6 +5,7 @@ import android.content.Intent;
 import androidx.annotation.NonNull;
 import com.arellomobile.mvp.MvpView;
 import com.arellomobile.mvp.viewstate.strategy.AddToEndSingleStrategy;
+import com.arellomobile.mvp.viewstate.strategy.OneExecutionStateStrategy;
 import com.arellomobile.mvp.viewstate.strategy.SingleStateStrategy;
 import com.arellomobile.mvp.viewstate.strategy.SkipStrategy;
 import com.arellomobile.mvp.viewstate.strategy.StateStrategyType;
@@ -75,6 +76,10 @@ public interface Activity extends MvpView {
 
     @StateStrategyType(SkipStrategy.class)
     void showToast(String s);
+
+    /** A notice that must be read: shown long, and on the next attach when the screen was stopped. */
+    @StateStrategyType(OneExecutionStateStrategy.class)
+    void showLongToast(int id);
 
     @StateStrategyType(SkipStrategy.class)
     void updateAdapter();

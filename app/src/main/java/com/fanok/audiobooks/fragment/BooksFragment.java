@@ -193,7 +193,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 menu.clear();
 
                 int menuResId;
-                if (mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)) {
+                if (mUrl.contains(Url.SERVER_IZIBUK)) {
                     menuResId = R.menu.books_izibuk_options_menu;
                 } else if (mUrl.contains(Url.SERVER_BAZA_KNIG)) {
                     menuResId = R.menu.books_baza_knig_options_menu;
@@ -270,7 +270,9 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 if (item != null) {
                     item.setChecked(true);
                 }
-                boolean isKnigoblud = Consts.getSOURCE() == Consts.SOURCE_KNIGOBLUD;
+                // the listing's own site decides its sort items, not the selected source: an author, reader or
+                // genre listing of another site opens from a book description
+                boolean isKnigoblud = mUrl.contains(Url.SERVER_KNIGOBLUD);
                 MenuItem todayItem = menu.findItem(R.id.knigoblud_today);
                 if (todayItem != null) todayItem.setVisible(isKnigoblud);
                 MenuItem trendingItem = menu.findItem(R.id.knigoblud_trending);
@@ -279,10 +281,10 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 if (finishedItem != null) finishedItem.setVisible(isKnigoblud);
                 MenuItem retingParent = menu.findItem(R.id.reting);
                 if (retingParent != null) retingParent.setVisible(!isKnigoblud);
-                boolean isIzibuk = Consts.getSOURCE() == Consts.SOURCE_IZI_BUK;
+                // only ever hidden here: onCreateMenu already hid Order where the listing takes no sort
                 MenuItem orderItem = menu.findItem(R.id.order);
-                if (orderItem != null) orderItem.setVisible(!isIzibuk);
-                boolean isAbmp3 = Consts.getSOURCE() == Consts.SOURCE_AUDIO_BOOK_MP3;
+                if (orderItem != null && mUrl.contains(Url.SERVER_IZIBUK)) orderItem.setVisible(false);
+                boolean isAbmp3 = mUrl.contains(Url.SERVER_ABMP3);
                 MenuItem popularParent = menu.findItem(R.id.popular_parent);
                 if (popularParent != null) popularParent.setVisible(!isAbmp3);
                 MenuItem retingParent2 = menu.findItem(R.id.reting);

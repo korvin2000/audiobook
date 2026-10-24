@@ -1067,6 +1067,11 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 
+    @Override
+    public void showLongToast(int id) {
+        Toast.makeText(this, id, Toast.LENGTH_LONG).show();
+    }
+
     @UnstableApi
     @Override
     public void updateAdapter() {

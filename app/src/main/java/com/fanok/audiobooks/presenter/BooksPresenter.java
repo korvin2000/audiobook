@@ -478,6 +478,10 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
             }
         }
 
+        if (url.isEmpty() && itemId != R.id.app_bar_search) {
+            // a source switch, a submenu parent or an item this site has no listing for
+            return;
+        }
         if (itemId == R.id.app_bar_search) {
             if (mUrl.contains(Url.SERVER_ABMP3)) {
                 if (mModelId == Consts.MODEL_AUTOR) {

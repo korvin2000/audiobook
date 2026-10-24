@@ -321,6 +321,8 @@
     <string name="offline">Офлайн</string>
     <string name="ofline_desc">Скрывать незагруженные главы из списка в офлайн режиме</string>
     <string name="go_offline">Переход в офлайн режим</string>
+    <string name="book_taken_down">Удалена правообладателем. Поищите на другом источнике</string>
+    <string name="book_taken_down_partial">Удалена правообладателем. Доступны скачанные главы</string>
     <string name="clear_saving">Очистить сохраненное</string>
     <string name="saved_file_not_found">Сохраненные файлы не найдены</string>
     <string name="no_selecetd">Нет выбранных элементов</string>

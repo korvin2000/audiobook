@@ -29,6 +29,7 @@ import androidx.media3.exoplayer.offline.DownloadManager;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.InjectViewState;
 import com.arellomobile.mvp.MvpPresenter;
+import com.fanok.audiobooks.BookRemovedException;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.EncodingExeption;
 import com.fanok.audiobooks.R;
@@ -701,8 +702,14 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                 getViewState().showData(mAudioPOJO, mBookPOJO.getUrl());
                 getViewState().showProgres(false);
                 if (!finalLocalAudio.isEmpty()) {
+                    if (mLastError instanceof BookRemovedException) {
+                        getViewState().showLongToast(R.string.book_taken_down_partial);
+                    }
                     error = false;
                     onCompleteAudio();
+                } else if (mLastError instanceof BookRemovedException) {
+                    getViewState().showLongToast(R.string.book_taken_down);
+                    error = true;
                 } else {
                     String errDetail = mLastError != null ? (" (" + mLastError.getClass().getSimpleName() + (mLastError.getMessage() != null ? ": " + mLastError.getMessage() : "") + ")") : "";
                     getViewState().showToast(mContext.getString(R.string.error_load_data)
