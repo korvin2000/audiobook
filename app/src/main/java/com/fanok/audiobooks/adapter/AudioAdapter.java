@@ -329,7 +329,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.ViewHolder> 
             return true;
         });
 
-        UiModeManager uiModeManager = (UiModeManager) viewHolder.mView.getContext().getSystemService(UI_MODE_SERVICE);
+        UiModeManager uiModeManager = (UiModeManager) viewHolder.mView.getContext().getApplicationContext().getSystemService(UI_MODE_SERVICE);
         if (uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {
             // --- Логика для ТВ ---
             // Устанавливаем OnKeyListener для эмуляции долгого нажатия

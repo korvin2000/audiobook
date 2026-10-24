@@ -382,7 +382,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
                 .getDefaultSharedPreferences(this);
 
         int isTablet = getResources().getInteger(R.integer.isTablet);
-        UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+        UiModeManager uiModeManager = (UiModeManager) getApplicationContext().getSystemService(UI_MODE_SERVICE);
         setContentView(R.layout.activity_book);
         mButtonCollapse = findViewById(R.id.buttonCollapse);
         mTopButtonsControls = findViewById(R.id.topButtonsControls);

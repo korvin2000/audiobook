@@ -166,7 +166,7 @@ public class MainActivity extends MvpAppCompatActivity
         if (pm == null || pm.isIgnoringBatteryOptimizations("com.fanok.audiobooks")) {
             return false;
         }
-        UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+        UiModeManager uiModeManager = (UiModeManager) getApplicationContext().getSystemService(UI_MODE_SERVICE);
         boolean dontShow = new StorageUtil(this).loadBattaryOptimizeDisenbled();
         return uiModeManager != null
                 && uiModeManager.getCurrentModeType() != Configuration.UI_MODE_TYPE_TELEVISION && !dontShow;
