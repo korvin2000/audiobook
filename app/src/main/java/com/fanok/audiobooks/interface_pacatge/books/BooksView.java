@@ -11,8 +11,10 @@ import com.arellomobile.mvp.viewstate.strategy.SkipStrategy;
 import com.arellomobile.mvp.viewstate.strategy.StateStrategyType;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
+import com.fanok.audiobooks.search.ListingFilters;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public interface BooksView extends MvpView {
     @StateStrategyType(AddToEndSingleStrategy.class)
@@ -56,5 +58,22 @@ public interface BooksView extends MvpView {
 
     @StateStrategyType(SkipStrategy.class)
     void recreate();
+
+    /** The duration/period bar above the list: its chips, the match count and the "search further" offer. */
+    @StateStrategyType(AddToEndSingleStrategy.class)
+    void showFilterBar(@NonNull ListingFilters.Bar bar);
+
+    /**
+     * The listing URL as the filter bar rewrote it, and the period chosen (null when none): kept in the fragment
+     * arguments for a restore.
+     */
+    @StateStrategyType(AddToEndSingleStrategy.class)
+    void rememberUrl(@NonNull String url, ListingFilters.Period period);
+
+    @StateStrategyType(SkipStrategy.class)
+    void showDurationPicker(@NonNull ListingFilters.Duration current);
+
+    @StateStrategyType(SkipStrategy.class)
+    void showPeriodPicker(@NonNull List<ListingFilters.Period> options, ListingFilters.Period current);
 
 }

@@ -29,6 +29,7 @@ import androidx.media3.exoplayer.offline.DownloadManager;
 import androidx.preference.PreferenceManager;
 import com.arellomobile.mvp.InjectViewState;
 import com.arellomobile.mvp.MvpPresenter;
+import com.fanok.audiobooks.BookRemovedException;
 import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.EncodingExeption;
 import com.fanok.audiobooks.R;
@@ -551,7 +552,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                 }
                 mAudioPOJO = audioPOJOS;
                 mOrdinals = null;
-                getViewState().showData(mAudioPOJO, mBookPOJO.getUrl());
+                getViewState().showData(mAudioPOJO, mBookPOJO.getUrl(), mAudioPOJO.size());
                 getViewState().showProgres(false);
                 error = false;
                 onCompleteAudio();
@@ -597,7 +598,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                     public void onNext(@NotNull ArrayList<AudioPOJO> bookPOJOS) {
                         mAudioPOJO = bookPOJOS;
                         mOrdinals = null;
-                        getViewState().showData(mAudioPOJO, mBookPOJO.getUrl());
+                        getViewState().showData(mAudioPOJO, mBookPOJO.getUrl(), mAudioPOJO.size());
                         error = false;
                     }
 
@@ -641,9 +642,11 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
         ArrayList<Integer> localOrdinals = new ArrayList<>();
 
         boolean foundSaved = false;
+        int rowsTotal = 0;
         if (mBookPOJO != null && mBookPOJO.getUrl() != null) {
             try {
                 java.util.List<com.fanok.audiobooks.room.BooksAudioEntity> savedList = mAudioListDBModel.getRows(mBookPOJO.getUrl());
+                rowsTotal = savedList.size();
                 if (!savedList.isEmpty()) {
                     DownloadIndex downloadIndex = null;
                     try {
@@ -686,6 +689,7 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
             }
         }
         final boolean finalFoundSaved = foundSaved;
+        final int finalRowsTotal = rowsTotal;
         final ArrayList<AudioPOJO> finalLocalAudio = localAudio;
         final int[] finalOrdinals = new int[localOrdinals.size()];
         for (int i = 0; i < finalOrdinals.length; i++) {
@@ -698,11 +702,18 @@ public class BookPresenter extends MvpPresenter<Activity> implements ActivityPre
                 mIsOfflineFallback = true;
                 mAudioPOJO = finalLocalAudio;
                 mOrdinals = finalOrdinals;
-                getViewState().showData(mAudioPOJO, mBookPOJO.getUrl());
+                // only the held chapters are listed: the book's status counts them against all its saved rows
+                getViewState().showData(mAudioPOJO, mBookPOJO.getUrl(), finalRowsTotal);
                 getViewState().showProgres(false);
                 if (!finalLocalAudio.isEmpty()) {
+                    if (mLastError instanceof BookRemovedException) {
+                        getViewState().showLongToast(R.string.book_taken_down_partial);
+                    }
                     error = false;
                     onCompleteAudio();
+                } else if (mLastError instanceof BookRemovedException) {
+                    getViewState().showLongToast(R.string.book_taken_down);
+                    error = true;
                 } else {
                     String errDetail = mLastError != null ? (" (" + mLastError.getClass().getSimpleName() + (mLastError.getMessage() != null ? ": " + mLastError.getMessage() : "") + ")") : "";
                     getViewState().showToast(mContext.getString(R.string.error_load_data)

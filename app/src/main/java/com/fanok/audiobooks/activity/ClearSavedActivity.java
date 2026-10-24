@@ -43,6 +43,7 @@ import com.arellomobile.mvp.presenter.ProvidePresenter;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.adapter.DownloadAdapter;
 import com.fanok.audiobooks.databinding.ActivityClearSavedBinding;
+import com.fanok.audiobooks.download.DownloadMonitor;
 import com.fanok.audiobooks.interface_pacatge.clearSeved.ClearSavedView;
 import com.fanok.audiobooks.pojo.DownloadItem;
 import com.fanok.audiobooks.presenter.ClearSavedPresenter;
@@ -71,10 +72,20 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
                     ContextCompat.RECEIVER_NOT_EXPORTED);
             isReceiverRegistered = true;
         }
+        // live speed, bytes and reasons of the rows in flight, every second while something downloads
+        DownloadMonitor.get().addListener(liveStatus);
+    }
+
+    /** Back from another screen: transfers that ended meanwhile are no longer live, so the rows are read again. */
+    @Override
+    protected void onRestart() {
+        super.onRestart();
+        mPresenter.updateData();
     }
 
     @Override
     protected void onStop() {
+        DownloadMonitor.get().removeListener(liveStatus);
         if (isReceiverRegistered) {
             unregisterReceiver(updateAdapter);
             isReceiverRegistered = false;
@@ -83,6 +94,10 @@ public class ClearSavedActivity extends MvpAppCompatActivity implements ClearSav
     }
 
     private DownloadAdapter mAdapter;
+
+    private final DownloadMonitor.Listener liveStatus = () -> {
+        if (mAdapter != null) mAdapter.refreshLive();
+    };
     private static final int MENU_EXPORT = Menu.FIRST + 100;
 
 

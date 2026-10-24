@@ -1,7 +1,6 @@
 package com.fanok.audiobooks.broadcasts;
 
 import android.Manifest;
-import android.app.Notification;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -9,7 +8,6 @@ import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresPermission;
-import androidx.core.app.NotificationManagerCompat;
 import androidx.media3.common.util.Log;
 import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
@@ -17,8 +15,8 @@ import androidx.media3.exoplayer.offline.Download;
 import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadIndex;
 import androidx.media3.exoplayer.offline.DownloadService;
-import com.fanok.audiobooks.NotificationDownload;
 import com.fanok.audiobooks.R;
+import com.fanok.audiobooks.download.DownloadMonitor;
 import com.fanok.audiobooks.service.ExoDownloadService;
 import com.fanok.audiobooks.util.DownloadUtil;
 import java.io.IOException;
@@ -29,12 +27,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Download actions from the notification and the Downloads screen. "id" names one download or, for CANCEL, a book;
+ * Download actions from the notification and the Downloads screen. "id" names one download or, for CANCEL, a book
+ * (its URL; for CANCEL_ALL its {@code DownloadMonitor.keyOf} key);
  * "ids" names several downloads (all chapters of a book row). The work runs on the download worker, never on main.
  */
 public class DownloadActionReceiver extends BroadcastReceiver {
     private final static int APP_STOP_REASON = 1001;
-    private final static int NOTIFICATION_ID = 564;
     public static final String EXTRA_ID = "id";
     public static final String EXTRA_IDS = "ids";
 
@@ -64,18 +62,19 @@ public class DownloadActionReceiver extends BroadcastReceiver {
         String id = i.getStringExtra(EXTRA_ID);
         List<String> ids = idsOf(i);
 
+        // No notification is touched here: DownloadMonitor owns the one left once the service stops and reconciles it
+        // with what each action changed ("paused", "waiting", "failed" for the book it names, else none).
         if ("PAUSE_ALL".equals(a)) {
             DownloadService.sendSetStopReason(
                     c, ExoDownloadService.class, /* contentId= */ null, APP_STOP_REASON, /* foreground= */ false);
-            notifyPaused(c, id, progressOf(idx, id), false);
 
         } else if ("RESUME_ALL".equals(a)) {
-            NotificationManagerCompat.from(c).cancel(NOTIFICATION_ID);
             DownloadService.sendSetStopReason(
                     c, ExoDownloadService.class, /* contentId= */ null, Download.STOP_REASON_NONE, /* foreground= */ true);
         } else if ("CANCEL_ALL".equals(a)) {
+            // the notification's Отмена: the unfinished downloads of the book it names ("id", a book key), else of all
             try {
-                removeIncomplete(c, idx);
+                removeIncomplete(c, idx, id);
             } catch (IOException e) {
                 Log.e("Downloads", "Remove incomplete failed", e);
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
@@ -86,11 +85,7 @@ public class DownloadActionReceiver extends BroadcastReceiver {
             for (String one : ids) {
                 DownloadService.sendSetStopReason(c, ExoDownloadService.class, one, APP_STOP_REASON, false);
             }
-            if (!ids.isEmpty() && findNextActiveDownload(idx, new LinkedHashSet<>(ids)) == null) {
-                notifyPaused(c, ids.get(0), progressOf(idx, ids.get(0)), true);
-            }
         } else if ("RESUME".equals(a)) {
-            if (!ids.isEmpty()) NotificationManagerCompat.from(c).cancel(NOTIFICATION_ID);
             for (String one : ids) {
                 DownloadService.sendSetStopReason(c, ExoDownloadService.class, one, Download.STOP_REASON_NONE, true);
             }
@@ -121,49 +116,16 @@ public class DownloadActionReceiver extends BroadcastReceiver {
         return ids;
     }
 
+    /** Removes the downloads not completed, of book {@code bookKey} only when given; completed chapters stay. */
     @OptIn(markerClass = UnstableApi.class)
-    private static int progressOf(DownloadIndex idx, @Nullable String id) {
-        if (id == null) return 0;
-        try {
-            Download d = idx.getDownload(id);
-            return d != null ? (int) d.getPercentDownloaded() : 0;
-        } catch (IOException e) {
-            return 0;
-        }
-    }
-
-    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
-    @OptIn(markerClass = UnstableApi.class)
-    private static void notifyPaused(Context c, @Nullable String id, int progress, boolean stateDownload) {
-        Notification n = NotificationDownload.getNotification(c, id, progress, stateDownload);
-        NotificationManagerCompat.from(c).notify(NOTIFICATION_ID, n);
-    }
-
-    @Nullable
-    @OptIn(markerClass = UnstableApi.class)
-    private Download findNextActiveDownload(DownloadIndex index, Set<String> excludeIds) {
-        try (DownloadCursor cursor = index.getDownloads()) {
-            while (cursor.moveToNext()) {
-                Download download = cursor.getDownload();
-                if ((download.state == Download.STATE_DOWNLOADING || download.state == Download.STATE_QUEUED)
-                        && !excludeIds.contains(download.request.id)) {
-                    return download;
-                }
-            }
-        } catch (IOException e) {
-            Log.e("DownloadActionReceiver", "Failed to find next active download", e);
-        }
-        return null;
-    }
-
-    @OptIn(markerClass = UnstableApi.class)
-    private void removeIncomplete(Context ctx, DownloadIndex idx) throws IOException {
+    private void removeIncomplete(Context ctx, DownloadIndex idx, @Nullable String bookKey) throws IOException {
+        boolean oneBook = bookKey != null && !bookKey.isEmpty();
         try (DownloadCursor c = idx.getDownloads()) {
             while (c.moveToNext()) {
                 Download d = c.getDownload();
-                if (d.state != Download.STATE_COMPLETED) {
-                    DownloadService.sendRemoveDownload(ctx, ExoDownloadService.class, d.request.id, false);
-                }
+                if (d.state == Download.STATE_COMPLETED) continue;
+                if (oneBook && !bookKey.equals(DownloadMonitor.keyOf(d.request))) continue;
+                DownloadService.sendRemoveDownload(ctx, ExoDownloadService.class, d.request.id, false);
             }
         }
     }

@@ -213,7 +213,7 @@ public class SearchableActivity extends MvpAppCompatActivity implements Searchab
                     (view, position) -> mPresenter.onAutorsListItemClick(view, position));
         }
 
-        UiModeManager uiModeManager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+        UiModeManager uiModeManager = (UiModeManager) getApplicationContext().getSystemService(Context.UI_MODE_SERVICE);
         if (uiModeManager == null || uiModeManager.getCurrentModeType() != Configuration.UI_MODE_TYPE_TELEVISION) {
             binding.list.addOnScrollListener(new RecyclerView.OnScrollListener() {
                 @Override

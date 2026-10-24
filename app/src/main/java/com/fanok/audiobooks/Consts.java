@@ -295,6 +295,20 @@ public class Consts {
         result = result.replaceAll("\\s+", " ").trim();
         return result;
     }
+    /**
+     * True only when the device has no active network at all (airplane mode, nothing connected): then a failed load
+     * of online content is not an error to report. A network without internet still counts as a network.
+     */
+    public static boolean isOffline(android.content.Context context) {
+        if (context == null) return false;
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            return cm != null && cm.getActiveNetwork() == null;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     public static boolean isNetworkAvailable(android.content.Context context) {
         if (context == null) return true;
         try {

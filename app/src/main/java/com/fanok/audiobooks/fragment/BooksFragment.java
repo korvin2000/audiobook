@@ -28,6 +28,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.MenuHost;
 import androidx.core.view.MenuProvider;
@@ -54,8 +55,10 @@ import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.GenrePOJO;
 import com.fanok.audiobooks.policy.ParentalControl;
 import com.fanok.audiobooks.presenter.BooksPresenter;
+import com.fanok.audiobooks.search.ListingFilters;
 import com.google.android.material.navigation.NavigationView;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import org.jetbrains.annotations.NotNull;
 
@@ -67,6 +70,10 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
     private static final String ARG_SUB_TITLE = "sub_title";
     private static final String ARG_SUB_TITLE_STRING = "sub_title_string";
     private static final String ARG_MODEL = "model_id";
+    /** The filter-bar period, kept next to the URL it rewrote ({@link #rememberUrl}). */
+    private static final String ARG_PERIOD = "period";
+    /** The URL the listing was opened on, never rewritten: MainActivity tells a re-tapped root by it. */
+    public static final String ARG_OPENED_URL = "opened_url";
 
 
     @InjectPresenter
@@ -99,6 +106,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
         }
         Bundle args = new Bundle();
         args.putString(ARG_URL, url);
+        args.putString(ARG_OPENED_URL, url);
         args.putInt(ARG_TITLE, title);
         args.putInt(ARG_MODEL, modelID);
         fragment.setArguments(args);
@@ -114,6 +122,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
         }
         Bundle args = new Bundle();
         args.putString(ARG_URL, url);
+        args.putString(ARG_OPENED_URL, url);
         args.putInt(ARG_TITLE, title);
         args.putInt(ARG_SUB_TITLE, subTitle);
         args.putInt(ARG_MODEL, modelID);
@@ -130,6 +139,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
         }
         Bundle args = new Bundle();
         args.putString(ARG_URL, url);
+        args.putString(ARG_OPENED_URL, url);
         args.putInt(ARG_TITLE, title);
         args.putString(ARG_SUB_TITLE_STRING, subTitle);
         args.putInt(ARG_MODEL, modelID);
@@ -193,7 +203,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 menu.clear();
 
                 int menuResId;
-                if (mUrl.contains(Url.SERVER_IZIBUK) || mUrl.contains(Url.SERVER_ABMP3)) {
+                if (mUrl.contains(Url.SERVER_IZIBUK)) {
                     menuResId = R.menu.books_izibuk_options_menu;
                 } else if (mUrl.contains(Url.SERVER_BAZA_KNIG)) {
                     menuResId = R.menu.books_baza_knig_options_menu;
@@ -270,7 +280,9 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 if (item != null) {
                     item.setChecked(true);
                 }
-                boolean isKnigoblud = Consts.getSOURCE() == Consts.SOURCE_KNIGOBLUD;
+                // the listing's own site decides its sort items, not the selected source: an author, reader or
+                // genre listing of another site opens from a book description
+                boolean isKnigoblud = mUrl.contains(Url.SERVER_KNIGOBLUD);
                 MenuItem todayItem = menu.findItem(R.id.knigoblud_today);
                 if (todayItem != null) todayItem.setVisible(isKnigoblud);
                 MenuItem trendingItem = menu.findItem(R.id.knigoblud_trending);
@@ -279,10 +291,10 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
                 if (finishedItem != null) finishedItem.setVisible(isKnigoblud);
                 MenuItem retingParent = menu.findItem(R.id.reting);
                 if (retingParent != null) retingParent.setVisible(!isKnigoblud);
-                boolean isIzibuk = Consts.getSOURCE() == Consts.SOURCE_IZI_BUK;
+                // only ever hidden here: onCreateMenu already hid Order where the listing takes no sort
                 MenuItem orderItem = menu.findItem(R.id.order);
-                if (orderItem != null) orderItem.setVisible(!isIzibuk);
-                boolean isAbmp3 = Consts.getSOURCE() == Consts.SOURCE_AUDIO_BOOK_MP3;
+                if (orderItem != null && mUrl.contains(Url.SERVER_IZIBUK)) orderItem.setVisible(false);
+                boolean isAbmp3 = mUrl.contains(Url.SERVER_ABMP3);
                 MenuItem popularParent = menu.findItem(R.id.popular_parent);
                 if (popularParent != null) popularParent.setVisible(!isAbmp3);
                 MenuItem retingParent2 = menu.findItem(R.id.reting);
@@ -335,6 +347,12 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
         }else {
             binding.refresh.setOnRefreshListener(() -> getPresenter().onRefresh());
         }
+
+        binding.durationChip.setOnClickListener(v -> getPresenter().onDurationChipClick());
+        binding.durationChip.setOnCloseIconClickListener(
+                v -> getPresenter().onDurationSelected(ListingFilters.Duration.ANY));
+        binding.periodChip.setOnClickListener(v -> getPresenter().onPeriodChipClick());
+        binding.filterMore.setOnClickListener(v -> getPresenter().onFilterMore());
 
         binding.list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -442,6 +460,7 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
             subTitle = getResources().getString(subTitleId);
         }
         return new BooksPresenter(url, modelID, subTitle,
+                ListingFilters.Period.of(arg != null ? arg.getString(ARG_PERIOD) : null),
                 requireContext().getApplicationContext());
     }
 
@@ -527,6 +546,99 @@ public class BooksFragment extends MvpAppCompatFragment implements BooksView {
     @Override
     public void showRefreshing(boolean b) {
         binding.refresh.setRefreshing(b);
+    }
+
+    @Override
+    public void showFilterBar(@NonNull ListingFilters.Bar bar) {
+        if (binding == null) {
+            return;
+        }
+        binding.filterBar.setVisibility(bar.visible ? View.VISIBLE : View.GONE);
+        if (!bar.visible) {
+            return;
+        }
+        boolean filtering = bar.isFiltering();
+        binding.durationChip.setVisibility(bar.durationAvailable ? View.VISIBLE : View.GONE);
+        binding.durationChip.setText(filtering ? durationLabel(bar.duration) : R.string.filter_duration);
+        binding.durationChip.setCloseIconVisible(filtering);
+        binding.periodChip.setVisibility(bar.period != null ? View.VISIBLE : View.GONE);
+        if (bar.period != null) {
+            binding.periodChip.setText(getString(periodLabel(bar.period)) + " ▾");
+        }
+        binding.filterStatusRow.setVisibility(filtering ? View.VISIBLE : View.GONE);
+        if (filtering) {
+            binding.filterStatus.setText(getString(
+                    bar.end && bar.scanned > 0 ? R.string.filter_status_end : R.string.filter_status,
+                    bar.shown, bar.scanned));
+            // stays in place while a page loads (disabled, keeping the TV focus); gone only at the real end
+            binding.filterMore.setVisibility(bar.end ? View.GONE : View.VISIBLE);
+            binding.filterMore.setEnabled(bar.canSearchMore);
+        }
+    }
+
+    @Override
+    public void rememberUrl(@NonNull String url, ListingFilters.Period period) {
+        Bundle args = getArguments();
+        if (args != null) {
+            args.putString(ARG_URL, url);
+            args.putString(ARG_PERIOD, period == null ? null : period.name());
+        }
+        mUrl = url;
+    }
+
+    @Override
+    public void showDurationPicker(@NonNull ListingFilters.Duration current) {
+        final ListingFilters.Duration[] options = ListingFilters.Duration.values();
+        String[] labels = new String[options.length];
+        for (int i = 0; i < options.length; i++) {
+            labels[i] = getString(durationLabel(options[i]));
+        }
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.filter_duration)
+                .setSingleChoiceItems(labels, current.ordinal(), (dialog, which) -> {
+                    dialog.dismiss();
+                    getPresenter().onDurationSelected(options[which]);
+                })
+                .show();
+    }
+
+    @Override
+    public void showPeriodPicker(@NonNull List<ListingFilters.Period> options, ListingFilters.Period current) {
+        String[] labels = new String[options.size()];
+        for (int i = 0; i < options.size(); i++) {
+            labels[i] = getString(periodLabel(options.get(i)));
+        }
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.filter_period)
+                .setSingleChoiceItems(labels, current == null ? -1 : options.indexOf(current), (dialog, which) -> {
+                    dialog.dismiss();
+                    getPresenter().onPeriodSelected(options.get(which));
+                })
+                .show();
+    }
+
+    private static int durationLabel(ListingFilters.Duration duration) {
+        switch (duration) {
+            case UNDER_30M: return R.string.duration_under_30m;
+            case FROM_30M_TO_1H: return R.string.duration_30m_1h;
+            case FROM_1H_TO_2H: return R.string.duration_1h_2h;
+            case OVER_2H: return R.string.duration_over_2h;
+            default: return R.string.duration_any;
+        }
+    }
+
+    private static int periodLabel(ListingFilters.Period period) {
+        switch (period) {
+            case DAY: return R.string.in_day;
+            case THREE_DAYS: return R.string.in_3_days;
+            case WEEK: return R.string.in_week;
+            case TWO_WEEKS: return R.string.in_2_weeks;
+            case MONTH: return R.string.in_month;
+            case QUARTER: return R.string.in_quarter;
+            case HALF_YEAR: return R.string.in_half_year;
+            case YEAR: return R.string.in_year;
+            default: return R.string.all_time;
+        }
     }
 
     protected BooksPresenter getPresenter() {

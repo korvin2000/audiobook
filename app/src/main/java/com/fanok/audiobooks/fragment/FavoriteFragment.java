@@ -201,6 +201,7 @@ public class FavoriteFragment extends MvpAppCompatFragment implements FavoriteVi
         if (titleId != 0) {
             requireActivity().setTitle(titleId);
         }
+        setSubTitle(""); // the previous screen's subtitle; an active filter sets its own on view-state replay
 
         SharedPreferences pref = PreferenceManager
                 .getDefaultSharedPreferences(requireContext());

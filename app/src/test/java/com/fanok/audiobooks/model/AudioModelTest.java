@@ -6,6 +6,7 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.fanok.audiobooks.BookRemovedException;
 import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.net.SiteHttp;
 import com.fanok.audiobooks.pojo.AudioPOJO;
@@ -403,6 +404,22 @@ public class AudioModelTest {
                 + "</div>", "https://player.example/book/");
         assertEquals("https://player.example/book/audio/1.mp3",
                 AudioModel.parseBazaKnigPlay8(frame, "Книга").get(0).getUrl());
+    }
+
+    @Test
+    public void takenDownBookSaysSoInsteadOfAParserError() {
+        // live wording: poleknig "Удалено правообладателем.", otrub "Удалена по жалобе правообладателя"
+        for (String[] page : new String[][]{
+                {"https://poleknig.com/books/232597", "<h1>Книга</h1><p>Удалено правообладателем.</p>"},
+                {"https://otrub.in/x.html", "<h1>Книга</h1><div>Удалена по жалобе правообладателя</div>"},
+                {"https://www.knigoblud.club/b1", "<h1>Книга</h1><b>Заблокировано по требованию правообладателя</b>"}}) {
+            assertThrows(page[0], BookRemovedException.class,
+                    () -> AudioModel.load(page[0], url -> Jsoup.parse(page[1], url)));
+        }
+        // a footer link alone is no takedown notice: the parser's own error stays
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> AudioModel.load(
+                "https://poleknig.com/books/1", url -> Jsoup.parse("<a href=/copyright>Для правообладателей</a>", url)));
+        assertTrue(!(e instanceof BookRemovedException));
     }
 
     @Test

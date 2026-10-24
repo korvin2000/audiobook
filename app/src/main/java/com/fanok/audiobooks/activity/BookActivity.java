@@ -71,6 +71,8 @@ import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.TvSeekBar;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.adapter.AudioAdapter;
+import com.fanok.audiobooks.download.DownloadStatus;
+import com.fanok.audiobooks.download.DownloadStatusText;
 import com.fanok.audiobooks.adapter.SectionsPagerAdapter;
 import com.fanok.audiobooks.interface_pacatge.book_content.Activity;
 import com.fanok.audiobooks.pojo.AudioPOJO;
@@ -132,6 +134,11 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
     private RecyclerView mList;
     private TextView mNameCurent;
     private ProgressBar mProgressBar;
+    private View mDownloadStatus;
+    private TextView mDownloadStatusText;
+    private ProgressBar mDownloadStatusBar;
+    /** The book's download status as the chapter list last computed it; drives the status row and the menu title. */
+    private DownloadStatus mLastDownloadStatus;
     private ImageButton mPreviousTop;
     private ImageButton mPlayTop;
     private ImageButton mNextTop;
@@ -375,7 +382,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
                 .getDefaultSharedPreferences(this);
 
         int isTablet = getResources().getInteger(R.integer.isTablet);
-        UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+        UiModeManager uiModeManager = (UiModeManager) getApplicationContext().getSystemService(UI_MODE_SERVICE);
         setContentView(R.layout.activity_book);
         mButtonCollapse = findViewById(R.id.buttonCollapse);
         mTopButtonsControls = findViewById(R.id.topButtonsControls);
@@ -387,6 +394,12 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         mList = findViewById(R.id.list);
         mNameCurent = findViewById(R.id.name_curent);
         mProgressBar = findViewById(R.id.progressBar);
+        mDownloadStatus = findViewById(R.id.downloadStatus);
+        mDownloadStatusText = findViewById(R.id.downloadStatusText);
+        mDownloadStatusBar = findViewById(R.id.downloadStatusBar);
+        if (mDownloadStatus != null) {
+            mDownloadStatus.setOnClickListener(view -> ClearSavedActivity.startActivity(this));
+        }
         mPreviousTop = findViewById(R.id.previousTop);
         mPlayTop = findViewById(R.id.playTop);
         mNextTop = findViewById(R.id.nextTop);
@@ -627,6 +640,7 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         mAudioAdapter = new AudioAdapter();
         mAudioAdapter.setBookUrl(mBookPOJO.getUrl());
         mAudioAdapter.setListener((view, position) -> mPresenter.onItemSelected(view, position));
+        mAudioAdapter.setStatusListener(this::showDownloadStatus);
         mList.setAdapter(mAudioAdapter);
         mLinearLayoutManager = new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false);
         mList.setLayoutManager(mLinearLayoutManager);
@@ -935,10 +949,12 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         registerInternalReceiver(updateAdapter, Broadcast_UPDATE_ADAPTER);
         registerInternalReceiver(showEqualizer, Broadcast_SHOW_EQUALIZER);
         broadcastSend(new Intent(Broadcast_SHOW_TITLE));
+        if (mAudioAdapter != null) mAudioAdapter.startLive();
     }
 
     @Override
     protected void onStop() {
+        if (mAudioAdapter != null) mAudioAdapter.stopLive();
         unregisterReceiver(setImage);
         unregisterReceiver(setProgress);
         unregisterReceiver(setSelectionBroadcast);
@@ -1067,12 +1083,46 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 
+    @Override
+    public void showLongToast(int id) {
+        Toast.makeText(this, id, Toast.LENGTH_LONG).show();
+    }
+
     @UnstableApi
     @Override
     public void updateAdapter() {
         if (mAudioAdapter != null) {
             mAudioAdapter.refresh();
         }
+    }
+
+    /**
+     * The row above the chapter list: what the book's download is doing (state, chapters, bytes, speed, time left),
+     * hidden while nothing is selected for download. Tapping it opens the Downloads screen.
+     */
+    private void showDownloadStatus(@NonNull DownloadStatus status) {
+        mLastDownloadStatus = status;
+        if (mDownloadStatus == null) return;
+        String line = DownloadStatusText.line(this, status);
+        if (line.isEmpty()) {
+            mDownloadStatus.setVisibility(View.GONE);
+            return;
+        }
+        mDownloadStatusText.setText(line);
+        mDownloadStatusBar.setProgress(status.percent());
+        mDownloadStatusBar.setVisibility(status.state == DownloadStatus.COMPLETE ? View.GONE : View.VISIBLE);
+        mDownloadStatus.setVisibility(View.VISIBLE);
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem download = menu.findItem(R.id.download_delete);
+        if (download != null) {
+            String brief = mLastDownloadStatus == null ? null : DownloadStatusText.brief(this, mLastDownloadStatus);
+            download.setTitle(brief == null ? getString(R.string.dowland_delete)
+                    : getString(R.string.download_menu_status, brief));
+        }
+        return super.onPrepareOptionsMenu(menu);
     }
 
     @Override
@@ -1097,9 +1147,9 @@ public class BookActivity extends MvpAppCompatActivity implements Activity {
 
     @UnstableApi
     @Override
-    public void showData(@NonNull ArrayList<AudioPOJO> data, @NonNull String bookUrl) {
+    public void showData(@NonNull ArrayList<AudioPOJO> data, @NonNull String bookUrl, int chaptersTotal) {
         if (mAudioAdapter != null) {
-            mAudioAdapter.setData(data);
+            mAudioAdapter.setData(data, chaptersTotal);
         }
     }
 

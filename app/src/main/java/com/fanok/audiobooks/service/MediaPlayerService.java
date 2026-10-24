@@ -241,6 +241,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
 
     private ExoPlayer player;
+    private EndAwareRenderersFactory renderersFactory;
     private MediaSessionCompat mediaSession;
     private StorageUtil storage;
     private SharedPreferences mPreferences;
@@ -274,6 +275,10 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private boolean restoring;
     /** Where the chapter being loaded starts. */
     private long startPositionMs;
+    /** Where the chapter's audio ended early and the chapter was loaded again, {@link C#TIME_UNSET} for nowhere. */
+    private long recoveredAtMs = C.TIME_UNSET;
+    /** The chapter was ended where its audio ended early, short of an end Media3 never reached: Play replays. */
+    private boolean finishedEarly;
     /** The error being shown, or retried while {@link #retryTask}/{@link #refreshTask} is pending. */
     @Nullable
     private PlaybackErrorPolicy.Kind failedKind;
@@ -422,6 +427,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
     private final Runnable progressTick = new Runnable() {
         @Override
         public void run() {
+            if (finishIfAudioEndedEarly()) {
+                return;
+            }
             sendProgress();
             if (SystemClock.elapsedRealtime() - lastCheckpointAt >= CHECKPOINT_INTERVAL_MS) {
                 checkpointNow(false);
@@ -608,7 +616,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             return;
         }
         int state = player.getPlaybackState();
-        if (!resolving && state == Player.STATE_ENDED && chapterIndex >= chapters.size() - 1) {
+        if (!resolving && (state == Player.STATE_ENDED || finishedEarly) && chapterIndex >= chapters.size() - 1) {
             //the finished book starts over
             pausedAt = -1;
             loadChapter(0, 0, true);
@@ -902,7 +910,9 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         restoring = false;
         if (freshChapter) {
             errorPolicy.reset();
+            recoveredAtMs = C.TIME_UNSET;
         }
+        finishedEarly = false;
         failedKind = null;
         chapterIndex = index;
         startPositionMs = Math.max(0, positionMs);
@@ -987,6 +997,7 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
         player.setMediaSource(mediaSource, startPositionMs);
         player.setPlayWhenReady(wantPlaying);
         player.prepare();
+        renderersFactory.onNewSource(player);
         publishState();
     }
 
@@ -1138,6 +1149,42 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
             checkpointNow(false);
             publishState();
         }
+    }
+
+    /**
+     * The chapter's audio has played out while the clock is still short of the chapter's declared duration: Media3
+     * would play silence up to it, and a seek into that stretch plays nothing either, as its source has finished
+     * loading. Only a new source brings the sound back, so the chapter is loaded again from a little before where it
+     * went silent, once per spot. An early end again at about that spot is where its audio really ends: the chapter
+     * ends, through Media3's own end where it can seek (STATE_ENDED, then {@link #onChapterEnded}). One that cannot
+     * seek would start over from its beginning: it ends at once. Checked while it plays.
+     */
+    private boolean finishIfAudioEndedEarly() {
+        if (player == null || resolving || player.getPlaybackState() != Player.STATE_READY) {
+            return false;
+        }
+        long position = player.getCurrentPosition();
+        long duration = player.getDuration();
+        if (!EndAwareRenderersFactory.endedEarly(renderersFactory.isAudioEnded(), position, duration)) {
+            return false;
+        }
+        boolean seekable = player.isCurrentMediaItemSeekable();
+        if (seekable && EndAwareRenderersFactory.shouldRecover(recoveredAtMs, position)) {
+            Log.w(TAG, "the audio ended " + (duration - position) + " ms before the chapter's end: loading it again");
+            recoveredAtMs = position;
+            loadChapter(chapterIndex, Math.max(0, position - EndAwareRenderersFactory.RECOVERY_REWIND_MS), false);
+            return true;
+        }
+        Log.w(TAG, "the audio ended " + (duration - position) + " ms before the chapter's end, seekable=" + seekable
+                + ": ending the chapter");
+        if (seekable) {
+            player.seekTo(duration);
+        } else {
+            //the player stays READY: Play must still replay a book whose last chapter this was
+            finishedEarly = true;
+            onChapterEnded();
+        }
+        return true;
     }
 
     private void handleError(@NonNull PlaybackException error) {
@@ -2195,7 +2242,8 @@ public class MediaPlayerService extends MediaBrowserServiceCompat {
                 .setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                 .build();
-        player = new ExoPlayer.Builder(this)
+        renderersFactory = new EndAwareRenderersFactory(this);
+        player = new ExoPlayer.Builder(this, renderersFactory)
                 .setLoadControl(loadControl)
                 .setTrackSelector(new DefaultTrackSelector(this))
                 //ExoPlayer owns audio focus and becoming-noisy; both change audibility, onPlayWhenReadyChanged syncs intent

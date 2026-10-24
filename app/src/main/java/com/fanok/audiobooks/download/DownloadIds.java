@@ -121,6 +121,35 @@ public final class DownloadIds {
         return downloadId != null && downloadId.startsWith(VERSION + "/" + bookKey(bookUrl) + "/");
     }
 
+    /**
+     * The {@link #bookKey} a {@link #chapterId}/{@link #streamId} was made with, read from the id without parsing the
+     * request; null for legacy ids. A chapter id ends in its ordinal; a stream id splits at its first "/stream/".
+     */
+    public static String bookKeyOfId(String downloadId) {
+        String prefix = VERSION + "/";
+        if (downloadId == null || !downloadId.startsWith(prefix)) return null;
+        int chapter = downloadId.lastIndexOf("/chapter/");
+        if (chapter > prefix.length() && isOrdinal(downloadId.substring(chapter + "/chapter/".length()))) {
+            return downloadId.substring(prefix.length(), chapter);
+        }
+        int stream = downloadId.indexOf("/stream/", prefix.length());
+        return stream > prefix.length() ? downloadId.substring(prefix.length(), stream) : null;
+    }
+
+    private static boolean isOrdinal(String s) {
+        int start = s.startsWith("-") ? 1 : 0;
+        if (s.length() <= start) return false;
+        for (int i = start; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    /** True for ids made by {@link #streamId}: one download for the chapters sharing an HLS stream. */
+    public static boolean isStreamId(String downloadId) {
+        return downloadId != null && downloadId.startsWith(VERSION + "/") && downloadId.contains("/stream/");
+    }
+
     /** HLS by media type as Media3 infers it for a URI without MIME type: the last path segment ends in ".m3u8". */
     public static boolean isHls(String url) {
         if (url == null) return false;

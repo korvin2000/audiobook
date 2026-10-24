@@ -19,12 +19,14 @@ import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
 import androidx.core.content.ContextCompat;
 import androidx.media3.common.util.UnstableApi;
-import androidx.media3.exoplayer.offline.Download;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.databinding.ItemDownloadBinding;
+import com.fanok.audiobooks.download.DownloadMonitor;
+import com.fanok.audiobooks.download.DownloadStatus;
+import com.fanok.audiobooks.download.DownloadStatusText;
 import com.fanok.audiobooks.pojo.DownloadItem;
 import com.squareup.picasso.Picasso;
 
@@ -41,6 +43,9 @@ import java.util.Set;
  */
 @OptIn(markerClass = UnstableApi.class)
 public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHolder> {
+
+    /** Change payload: only the live status of the row is redrawn. */
+    private static final Object LIVE = new Object();
 
     private List<DownloadItem> itemList = Collections.emptyList();
     private final Set<String> selectedIds = new LinkedHashSet<>();
@@ -147,6 +152,29 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
     }
 
     @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position, @NonNull List<Object> payloads) {
+        if (payloads.contains(LIVE)) {
+            holder.bindStatus(itemList.get(position));
+        } else {
+            super.onBindViewHolder(holder, position, payloads);
+        }
+    }
+
+    /** The book's status now: the snapshot's transfers with the manager's live state of the ones in flight. */
+    @NonNull
+    private static DownloadStatus statusOf(@NonNull DownloadItem item) {
+        return DownloadMonitor.get().statusOf(item.getParts(), item.getCompleted(), item.getSelected(), item.getTotal());
+    }
+
+    /** Redraws the status of the rows still in flight (a tick of the monitor), without touching the rest. */
+    public void refreshLive() {
+        for (int i = 0; i < itemList.size(); i++) {
+            DownloadItem item = itemList.get(i);
+            if (!item.getParts().isEmpty() && !item.isComplete()) notifyItemChanged(i, LIVE);
+        }
+    }
+
+    @Override
     public int getItemCount() {
         return itemList.size();
     }
@@ -203,13 +231,6 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
             setIconForDetailTextView(binding.textExported, R.drawable.ic_download, 12);
             setIconForDetailTextView(binding.sourceName, R.drawable.ic_web, 12);
 
-            if (item.getProgress()>0) {
-                binding.progressDownload.setIndeterminate(false);
-                binding.progressDownload.setProgress(item.getProgress());
-            }else {
-                binding.progressDownload.setIndeterminate(true);
-            }
-
             Context context = itemView.getContext();
             String title = item.getBookName() == null || item.getBookName().isEmpty() ? item.getBookUrl() : item.getBookName();
             binding.textFileName.setText(title);
@@ -253,18 +274,20 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
 
             binding.buttonControlDownload.setOnClickListener(v -> {
                 if (listener == null) return;
-                switch (item.getStatus()) {
-                    case Download.STATE_DOWNLOADING:
-                    case Download.STATE_QUEUED:
+                switch (statusOf(item).state) {
+                    case DownloadStatus.DOWNLOADING:
+                    case DownloadStatus.STALLED:
+                    case DownloadStatus.QUEUED:
+                    case DownloadStatus.WAITING_NETWORK:
                         listener.onPauseClick(item);
                         break;
-                    case Download.STATE_STOPPED:
+                    case DownloadStatus.PAUSED:
                         listener.onResumeClick(item);
                         break;
-                    case Download.STATE_FAILED:
+                    case DownloadStatus.FAILED:
                         listener.onRestartClick(item);
                         break;
-                    case Download.STATE_COMPLETED:
+                    case DownloadStatus.COMPLETE:
                         listener.onOpenClick(item);
                         break;
                     default:
@@ -299,7 +322,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
             binding.checkboxSelect.setChecked(selectedIds.contains(id));
 
 
-            updateUiForStatus(item);
+            bindStatus(item);
         }
 
 
@@ -311,31 +334,35 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHo
             notifySelectionChanged();
         }
 
-        private void updateUiForStatus(DownloadItem item) {
-            switch (item.getStatus()) {
-                case Download.STATE_DOWNLOADING:
-                case Download.STATE_QUEUED:
-                    binding.progressDownload.setVisibility(View.VISIBLE);
-                    binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_pause, 24));
+        /** The live part of the row: determinate bar, status line and the control button for the current state. */
+        void bindStatus(DownloadItem item) {
+            DownloadStatus status = statusOf(item);
+            Context context = itemView.getContext();
+            String line = DownloadStatusText.line(context, status);
+            binding.textStatus.setText(line);
+            binding.textStatus.setVisibility(line.isEmpty() ? View.GONE : View.VISIBLE);
+            binding.progressDownload.setIndeterminate(false);
+            binding.progressDownload.setProgress(status.percent());
+            // A book is complete only when every chapter is; otherwise the bar shows how much of it is.
+            boolean barHidden = status.state == DownloadStatus.NONE
+                    || (status.state == DownloadStatus.COMPLETE && item.isComplete());
+            binding.progressDownload.setVisibility(barHidden ? View.INVISIBLE : View.VISIBLE);
+            int icon;
+            switch (status.state) {
+                case DownloadStatus.PAUSED:
+                    icon = R.drawable.ic_play;
                     break;
-                case Download.STATE_STOPPED:
-                    binding.progressDownload.setVisibility(View.VISIBLE);
-                    binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_play, 24));
+                case DownloadStatus.COMPLETE:
+                    icon = R.drawable.ic_is_check;
                     break;
-                case Download.STATE_COMPLETED:
-                    // A book is complete only when every chapter is; otherwise the bar shows how much of it is.
-                    binding.progressDownload.setVisibility(item.isComplete() ? View.INVISIBLE : View.VISIBLE);
-                    binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_is_check, 24));
-                    break;
-                case Download.STATE_FAILED:
-                    binding.progressDownload.setVisibility(View.INVISIBLE);
-                    binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_error, 24));
+                case DownloadStatus.FAILED:
+                    icon = R.drawable.ic_error;
                     break;
                 default:
-                    binding.progressDownload.setVisibility(View.VISIBLE);
-                    binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(R.drawable.ic_pause, 24));
+                    icon = R.drawable.ic_pause;
                     break;
             }
+            binding.buttonControlDownload.setImageBitmap(getBitMapWithFixedSize(icon, 24));
         }
 
 

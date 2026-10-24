@@ -2,6 +2,7 @@ package com.fanok.audiobooks.model;
 
 import android.content.Context;
 import androidx.annotation.NonNull;
+import com.fanok.audiobooks.BookRemovedException;
 import com.fanok.audiobooks.Url;
 import com.fanok.audiobooks.interface_pacatge.book_content.AudioModelInterfece;
 import com.fanok.audiobooks.net.JsonSlice;
@@ -100,7 +101,14 @@ public class AudioModel implements AudioModelInterfece {
             throw new IllegalArgumentException("unsupported host: " + Url.hostOf(rawUrl));
         }
         Document doc = pages.get(url);
-        return parser.parse(doc, location(doc, url));
+        try {
+            return parser.parse(doc, location(doc, url));
+        } catch (IllegalStateException e) {
+            if (BookRemovedException.isNotice(doc.text())) {
+                throw new BookRemovedException(url);
+            }
+            throw e;
+        }
     }
 
     private static PageParser parser(String url) {
