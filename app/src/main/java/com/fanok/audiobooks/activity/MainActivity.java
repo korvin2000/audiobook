@@ -42,6 +42,7 @@ import com.arellomobile.mvp.presenter.InjectPresenter;
 import com.arellomobile.mvp.presenter.ProvidePresenter;
 import com.fanok.audiobooks.AppThemes;
 import com.fanok.audiobooks.R;
+import com.fanok.audiobooks.fragment.BooksFragment;
 import com.fanok.audiobooks.interface_pacatge.main.MainView;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.StorageUtil;
@@ -49,6 +50,7 @@ import com.fanok.audiobooks.presenter.MainPresenter;
 import com.google.android.material.navigation.NavigationView;
 
 import java.util.ArrayList;
+import java.util.Objects;
 import org.jetbrains.annotations.NotNull;
 
 
@@ -375,17 +377,30 @@ public class MainActivity extends MvpAppCompatActivity
             return;
         }
         Fragment current = fragmentManager.findFragmentById(R.id.container);
-        if (current != null && tag.equals(current.getTag()) && !tag.equals("searchebleBooks")) {
+        // the same tag on another URL (a filter-bar period rewrote the current one) is a different listing
+        if (current != null && tag.equals(current.getTag()) && !tag.equals("searchebleBooks")
+                && Objects.equals(urlArg(current), urlArg(fragment))) {
             return;
         }
         fragmentManager.popBackStackImmediate(tag, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        Fragment top = fragmentManager.findFragmentById(R.id.container);
         FragmentTransaction transaction = fragmentManager.beginTransaction();
         transaction.replace(R.id.container, fragment, tag);
-        if (fragmentManager.findFragmentById(R.id.container) != null) {
+        // the root screen still on top after the pop and re-opened on the URL it was opened on (a filter-bar
+        // period rewrote its current one) is replaced in place, so Back does not show a copy of it; another
+        // listing under the same tag (an author's, opened from a book) is pushed
+        String opened = top != null && top.getArguments() != null
+                ? top.getArguments().getString(BooksFragment.ARG_OPENED_URL) : null;
+        if (top != null && !(tag.equals(top.getTag()) && opened != null && opened.equals(urlArg(fragment)))) {
             transaction.addToBackStack(tag);
         }
         transaction.commit();
 
+    }
+
+    private static String urlArg(Fragment fragment) {
+        Bundle args = fragment.getArguments();
+        return args == null ? null : args.getString("url");
     }
 
     @Override
