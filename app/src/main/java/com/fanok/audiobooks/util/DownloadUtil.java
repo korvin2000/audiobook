@@ -143,8 +143,9 @@ public class DownloadUtil {
         }
         OkHttpDataSource.Factory http = new OkHttpDataSource.Factory(client)
                 .setDefaultRequestProperties(requestHeaders(bookUrl));
+        //below the cache: a body cut short over HTTP/2 must not read as the end of the chapter
         return new ResolvingDataSource.Factory(
-                new DefaultDataSource.Factory(context.getApplicationContext(), http),
+                new DefaultDataSource.Factory(context.getApplicationContext(), FullBodyDataSource.factory(http)),
                 dataSpec -> dataSpec.withUri(withoutLegacyRef(dataSpec.uri)));
     }
 
