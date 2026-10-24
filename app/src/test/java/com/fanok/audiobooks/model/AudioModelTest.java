@@ -407,6 +407,20 @@ public class AudioModelTest {
     }
 
     @Test
+    public void shuffledPlayerjsMirrorsGiveOneStableUrl() {
+        // poleknig answers "a or b" and "b or a" on different loads of the same playlist
+        String a = "https://poleknig.com/files/1?d=1&h=x";
+        String b = "https://poleknig.com/files/1?h=x";
+        String first = AudioModel.parsePlayerjsPlaylist("[{\"title\":\"1\",\"file\":\"" + a + " or " + b + "\"}]",
+                "https://poleknig.com/books/1", "Книга").get(0).getUrl();
+        String second = AudioModel.parsePlayerjsPlaylist("[{\"title\":\"1\",\"file\":\"" + b + " or " + a + "\"}]",
+                "https://poleknig.com/books/1", "Книга").get(0).getUrl();
+        assertEquals(first, second);
+        assertTrue(first.equals(a) || first.equals(b));
+        assertEquals(b, AudioModel.oneOf(b));
+    }
+
+    @Test
     public void takenDownBookSaysSoInsteadOfAParserError() {
         // live wording: poleknig "Удалено правообладателем.", otrub "Удалена по жалобе правообладателя"
         for (String[] page : new String[][]{

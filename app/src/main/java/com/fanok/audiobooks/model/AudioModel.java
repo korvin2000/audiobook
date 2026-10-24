@@ -308,8 +308,19 @@ public class AudioModel implements AudioModelInterfece {
                 addPlayerjsItems(chapters, folder.getAsJsonArray());
                 return null;
             }
-            return chapters.chapter(string(o, "title"), playerjsUrl(string(o, "file")), seconds(o.get("duration")));
+            return chapters.chapter(string(o, "title"), oneOf(playerjsUrl(string(o, "file"))),
+                    seconds(o.get("duration")));
         });
+    }
+
+    /**
+     * Playerjs "{@code a or b}" lists equivalent mirrors, and some sites (poleknig) shuffle their order on every load.
+     * A fixed pick keeps the chapter's URL, which the saved rows, downloads and deletion match it by, the same.
+     */
+    static String oneOf(String file) {
+        String[] alternatives = file.trim().split("\\s+or\\s+");
+        Arrays.sort(alternatives);
+        return alternatives[0];
     }
 
     /**
