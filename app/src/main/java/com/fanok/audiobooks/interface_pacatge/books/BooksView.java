@@ -14,7 +14,6 @@ import com.fanok.audiobooks.pojo.GenrePOJO;
 import com.fanok.audiobooks.search.ListingFilters;
 
 import java.util.ArrayList;
-import java.util.List;
 
 public interface BooksView extends MvpView {
     @StateStrategyType(AddToEndSingleStrategy.class)
@@ -59,7 +58,10 @@ public interface BooksView extends MvpView {
     @StateStrategyType(SkipStrategy.class)
     void recreate();
 
-    /** The duration/period bar above the list: its chips, the match count and the "search further" offer. */
+    /**
+     * The filter state: the toolbar's filter item (duration range, period choices) and, while a duration filter
+     * is on, the strip above the list with the range, the match count and the "search further" offer.
+     */
     @StateStrategyType(AddToEndSingleStrategy.class)
     void showFilterBar(@NonNull ListingFilters.Bar bar);
 
@@ -72,8 +74,5 @@ public interface BooksView extends MvpView {
 
     @StateStrategyType(SkipStrategy.class)
     void showDurationPicker(@NonNull ListingFilters.Duration current);
-
-    @StateStrategyType(SkipStrategy.class)
-    void showPeriodPicker(@NonNull List<ListingFilters.Period> options, ListingFilters.Period current);
 
 }

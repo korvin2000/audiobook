@@ -31,34 +31,138 @@ import java.util.regex.Pattern;
  */
 public final class ListingFilters {
 
-    /** A duration range in whole minutes, {@code [from, to)}. */
-    public enum Duration {
-        ANY(0, Integer.MAX_VALUE),
-        UNDER_30M(0, 30),
-        FROM_30M_TO_1H(30, 60),
-        FROM_1H_TO_2H(60, 120),
-        OVER_2H(120, Integer.MAX_VALUE);
+    /**
+     * A duration range in whole minutes, {@code [from, to)}; a {@code to} of {@link #UNBOUNDED} has no upper limit.
+     * The five ranges older versions offered stay as named presets, and their stored enum names still read back.
+     */
+    public static final class Duration {
+        /** The {@code to} of a range without an upper limit. */
+        public static final int UNBOUNDED = Integer.MAX_VALUE;
+
+        public static final Duration ANY = new Duration(0, UNBOUNDED);
+        public static final Duration UNDER_30M = new Duration(0, 30);
+        public static final Duration FROM_30M_TO_1H = new Duration(30, 60);
+        public static final Duration FROM_1H_TO_2H = new Duration(60, 120);
+        public static final Duration OVER_2H = new Duration(120, UNBOUNDED);
+
+        /** The ready-made ranges, in menu order. */
+        public static final List<Duration> PRESETS = Collections.unmodifiableList(
+                Arrays.asList(ANY, UNDER_30M, FROM_30M_TO_1H, FROM_1H_TO_2H, OVER_2H));
+
+        /**
+         * The stops of the range slider in minutes: dense where books are short, sparse where they are long, so
+         * both a 20-minute story and a 30-hour epic are a few steps away; the last stop has no limit.
+         */
+        public static final int[] STOPS = {0, 15, 30, 45, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 900,
+                1200, 1800, UNBOUNDED};
+
+        /** The enum names older versions stored, in {@link #PRESETS} order. */
+        private static final String[] LEGACY_NAMES = {"ANY", "UNDER_30M", "FROM_30M_TO_1H", "FROM_1H_TO_2H",
+                "OVER_2H"};
+        private static final Pattern KEY = Pattern.compile("(\\d+)-(\\d*)");
 
         public final int fromMinutes;
         public final int toMinutes;
 
-        Duration(int fromMinutes, int toMinutes) {
+        private Duration(int fromMinutes, int toMinutes) {
             this.fromMinutes = fromMinutes;
             this.toMinutes = toMinutes;
         }
 
-        public boolean contains(int minutes) {
-            return minutes >= fromMinutes && minutes < toMinutes;
+        /** The range {@code [from, to)}; {@link #ANY} when it bounds nothing or is empty. */
+        public static Duration of(int fromMinutes, int toMinutes) {
+            int from = Math.max(0, fromMinutes);
+            if (toMinutes <= from || (from == 0 && toMinutes == UNBOUNDED)) {
+                return ANY;
+            }
+            return new Duration(from, toMinutes);
         }
 
-        /** The stored name, or {@link #ANY} for anything else (an older or garbled preference). */
-        public static Duration of(String name) {
-            for (Duration d : values()) {
-                if (d.name().equals(name)) {
-                    return d;
+        /** The range between slider stops {@code from} and {@code to} (indexes into {@link #STOPS}). */
+        public static Duration ofStops(int from, int to) {
+            return of(STOPS[clampStop(from)], STOPS[clampStop(to)]);
+        }
+
+        /** The stop at or below {@code fromMinutes}: where the slider's lower thumb sits. */
+        public int fromStop() {
+            int i = STOPS.length - 2;
+            while (i > 0 && STOPS[i] > fromMinutes) {
+                i--;
+            }
+            return i;
+        }
+
+        /** The stop at or above {@code toMinutes}: where the slider's upper thumb sits. */
+        public int toStop() {
+            int i = 1;
+            while (i < STOPS.length - 1 && STOPS[i] < toMinutes) {
+                i++;
+            }
+            return i;
+        }
+
+        private static int clampStop(int i) {
+            return Math.max(0, Math.min(STOPS.length - 1, i));
+        }
+
+        public boolean isAny() {
+            return fromMinutes == 0 && toMinutes == UNBOUNDED;
+        }
+
+        public boolean isUnbounded() {
+            return toMinutes == UNBOUNDED;
+        }
+
+        public boolean contains(int minutes) {
+            return minutes >= fromMinutes && (isUnbounded() || minutes < toMinutes);
+        }
+
+        /** The stored form: {@code from-to}, or {@code from-} without an upper limit. */
+        public String key() {
+            return fromMinutes + "-" + (isUnbounded() ? "" : Integer.toString(toMinutes));
+        }
+
+        /** {@link #key} read back, or an enum name an older version stored; {@link #ANY} for anything else. */
+        public static Duration of(String stored) {
+            if (stored == null) {
+                return ANY;
+            }
+            for (int i = 0; i < LEGACY_NAMES.length; i++) {
+                if (LEGACY_NAMES[i].equals(stored)) {
+                    return PRESETS.get(i);
                 }
             }
-            return ANY;
+            Matcher m = KEY.matcher(stored);
+            if (!m.matches()) {
+                return ANY;
+            }
+            try {
+                return of(Integer.parseInt(m.group(1)), m.group(2).isEmpty() ? UNBOUNDED : Integer.parseInt(m.group(2)));
+            } catch (NumberFormatException e) {
+                return ANY;
+            }
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Duration)) {
+                return false;
+            }
+            Duration d = (Duration) o;
+            return fromMinutes == d.fromMinutes && toMinutes == d.toMinutes;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * fromMinutes + toMinutes;
+        }
+
+        @Override
+        public String toString() {
+            return key();
         }
     }
 
@@ -91,6 +195,8 @@ public final class ListingFilters {
         public final boolean durationAvailable;
         /** The period the listing URL carries, or null when the listing takes none. */
         public final Period period;
+        /** The periods the listing accepts, in menu order; empty when it takes none. */
+        public final List<Period> periods;
         /** Cards that pass the filter, and cards fetched so far. */
         public final int shown;
         public final int scanned;
@@ -101,12 +207,13 @@ public final class ListingFilters {
         /** Filtering, more pages and no load running: "search further" can be pressed. */
         public final boolean canSearchMore;
 
-        Bar(boolean visible, Duration duration, boolean durationAvailable, Period period, int shown, int scanned,
-                boolean end, boolean loading) {
+        Bar(boolean visible, Duration duration, boolean durationAvailable, Period period, List<Period> periods,
+                int shown, int scanned, boolean end, boolean loading) {
             this.visible = visible;
             this.duration = duration;
             this.durationAvailable = durationAvailable;
             this.period = period;
+            this.periods = periods;
             this.shown = shown;
             this.scanned = scanned;
             this.end = end;
@@ -114,10 +221,11 @@ public final class ListingFilters {
             this.canSearchMore = isFiltering() && !end && !loading;
         }
 
-        public static final Bar HIDDEN = new Bar(false, Duration.ANY, false, null, 0, 0, false, false);
+        public static final Bar HIDDEN = new Bar(false, Duration.ANY, false, null, Collections.<Period>emptyList(),
+                0, 0, false, false);
 
         public boolean isFiltering() {
-            return durationAvailable && duration != Duration.ANY;
+            return durationAvailable && !duration.isAny();
         }
     }
 
@@ -183,7 +291,7 @@ public final class ListingFilters {
 
     /** True when {@code book} passes {@code duration}; a card without a readable duration passes only ANY. */
     public static boolean matches(BookPOJO book, Duration duration) {
-        if (duration == Duration.ANY) {
+        if (duration.isAny()) {
             return true;
         }
         int minutes = durationMinutes(book.getTime());
@@ -192,7 +300,7 @@ public final class ListingFilters {
 
     /** The books of {@code all} that pass {@code duration}; the same list when it is ANY. */
     public static ArrayList<BookPOJO> filter(ArrayList<BookPOJO> all, Duration duration) {
-        if (duration == Duration.ANY) {
+        if (duration.isAny()) {
             return all;
         }
         ArrayList<BookPOJO> out = new ArrayList<>();
@@ -226,30 +334,18 @@ public final class ListingFilters {
     /**
      * {@code url} with the server's own duration bound for {@code duration}, where the server has one; the
      * baza-knig index becomes its date-sorted {@code /f/} twin. The bound is whole hours (the site compares the
-     * integer part of HH:MM:SS), so the exact range is still applied to the cards afterwards.
+     * integer part of HH:MM:SS): {@code from} rounds down to its hour, {@code to} up to the end of the hour before
+     * it, so the server never drops a match and the exact range is still applied to the cards afterwards.
      */
     public static String withDuration(Provider provider, String url, Duration duration) {
-        if (!filtersDurationOnServer(provider, url) || (duration == Duration.ANY && isBazaKnigIndex(url))) {
+        if (!filtersDurationOnServer(provider, url) || (duration.isAny() && isBazaKnigIndex(url))) {
             return url;
         }
         String base = isBazaKnigIndex(url) ? Url.SERVER_BAZA_KNIG + "/f/sort=date/order=desc/page/" : url;
-        String from = null;
-        String to = null;
-        switch (duration) {
-            case UNDER_30M:
-            case FROM_30M_TO_1H:
-                to = "00:59:59";
-                break;
-            case FROM_1H_TO_2H:
-                from = "01:00:00";
-                to = "01:59:59";
-                break;
-            case OVER_2H:
-                from = "02:00:00";
-                break;
-            default:
-                break;
-        }
+        int fromHours = duration.fromMinutes / 60;
+        String from = fromHours > 0 ? String.format(Locale.ROOT, "%02d:00:00", fromHours) : null;
+        String to = duration.isUnbounded() ? null
+                : String.format(Locale.ROOT, "%02d:59:59", (duration.toMinutes + 59) / 60 - 1);
         return withSegment(withSegment(base, "t.prodolzhitelnost", to), "f.prodolzhitelnost", from);
     }
 
@@ -421,7 +517,7 @@ public final class ListingFilters {
         if (!durationAvailable && period == null) {
             return Bar.HIDDEN;
         }
-        return new Bar(true, duration, durationAvailable, period, shown, scanned, end, loading);
+        return new Bar(true, duration, durationAvailable, period, periods(provider, url), shown, scanned, end, loading);
     }
 
     // ---------------------------------------------------------------- url helpers

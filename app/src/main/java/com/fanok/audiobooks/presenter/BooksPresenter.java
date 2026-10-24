@@ -41,14 +41,16 @@ import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.schedulers.Schedulers;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.List;
 import java.util.Objects;
 
 @InjectViewState
 public class BooksPresenter extends MvpPresenter<BooksView> implements
         com.fanok.audiobooks.interface_pacatge.books.BooksPresenter {
 
-    /** Preference holding the {@link ListingFilters.Duration} name the user filters book listings by. */
+    /**
+     * Preference holding the {@link ListingFilters.Duration#key} of the range the user filters book listings by
+     * (older versions stored a preset's enum name; {@link ListingFilters.Duration#of(String)} reads both).
+     */
     private static final String PREF_DURATION = "listing_duration_filter";
 
     private boolean isLoading = false;
@@ -176,20 +178,12 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
     }
 
     @Override
-    public void onPeriodChipClick() {
-        List<ListingFilters.Period> options = ListingFilters.periods(mProvider, mUrl);
-        if (!options.isEmpty()) {
-            getViewState().showPeriodPicker(options, period());
-        }
-    }
-
-    @Override
     public void onDurationSelected(@NonNull ListingFilters.Duration duration) {
-        if (mModelId != Consts.MODEL_BOOKS || duration == mDuration) {
+        if (mModelId != Consts.MODEL_BOOKS || duration.equals(mDuration)) {
             return;
         }
         mDuration = duration;
-        getDefaultSharedPreferences(mContext).edit().putString(PREF_DURATION, duration.name()).apply();
+        getDefaultSharedPreferences(mContext).edit().putString(PREF_DURATION, duration.key()).apply();
         String url = ListingFilters.withDuration(mProvider, mUrl, duration);
         if (!url.equals(mUrl)) {
             // the server bounds the duration itself: a different listing. Not kept in the fragment arguments:
@@ -229,7 +223,7 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
         return true;
     }
 
-    /** The period shown in the bar and the picker: baza-knig's stored choice, else what the URL carries. */
+    /** The period the filter menu shows checked: baza-knig's stored choice, else what the URL carries. */
     private ListingFilters.Period period() {
         if (mProvider == Provider.BAZA_KNIG && mPeriod != null && !ListingFilters.periods(mProvider, mUrl).isEmpty()) {
             return mPeriod;
@@ -273,7 +267,7 @@ public class BooksPresenter extends MvpPresenter<BooksView> implements
 
     /** After a page of a filtered book listing: fetches the next one while the hunt budget allows. */
     private void huntOn() {
-        if (mModelId != Consts.MODEL_BOOKS || effectiveDuration() == ListingFilters.Duration.ANY || isLoading
+        if (mModelId != Consts.MODEL_BOOKS || effectiveDuration().isAny() || isLoading
                 || mBookCursor.isEnd()
                 || !ListingFilters.keepHunting(books.size() - mHuntBaseShown, books.size(), mHuntPages)) {
             return;

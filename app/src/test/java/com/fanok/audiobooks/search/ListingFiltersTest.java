@@ -75,6 +75,58 @@ public class ListingFiltersTest {
     }
 
     @Test
+    public void aCustomRangeKeepsItsLowerBoundAndDropsItsUpperOne() {
+        Duration range = Duration.of(45, 90);
+        assertTrue(ListingFilters.matches(book("00:45:00"), range));
+        assertTrue(ListingFilters.matches(book("01:29:59"), range));
+        assertFalse(ListingFilters.matches(book("01:30:00"), range));
+        assertFalse(ListingFilters.matches(book("00:44:59"), range));
+        Duration longBooks = Duration.of(600, Duration.UNBOUNDED);
+        assertTrue(ListingFilters.matches(book("26:00:00"), longBooks));
+        assertFalse(ListingFilters.matches(book("09:59:59"), longBooks));
+        // a range that bounds nothing is ANY, and so is an empty one
+        assertTrue(Duration.of(0, Duration.UNBOUNDED).isAny());
+        assertEquals(Duration.ANY, Duration.of(90, 45));
+        assertEquals(Duration.FROM_1H_TO_2H, Duration.of(60, 120));
+    }
+
+    @Test
+    public void storedDurationReadsTheOldEnumNamesAndTheNewKeys() {
+        // what versions with the five-value enum stored
+        assertEquals(Duration.ANY, Duration.of("ANY"));
+        assertEquals(Duration.UNDER_30M, Duration.of("UNDER_30M"));
+        assertEquals(Duration.FROM_30M_TO_1H, Duration.of("FROM_30M_TO_1H"));
+        assertEquals(Duration.FROM_1H_TO_2H, Duration.of("FROM_1H_TO_2H"));
+        assertEquals(Duration.OVER_2H, Duration.of("OVER_2H"));
+        // the range keys round-trip, an open end included
+        assertEquals("45-90", Duration.of(45, 90).key());
+        assertEquals("120-", Duration.OVER_2H.key());
+        assertEquals(Duration.of(45, 90), Duration.of("45-90"));
+        assertEquals(Duration.OVER_2H, Duration.of("120-"));
+        for (Duration d : Duration.PRESETS) {
+            assertEquals(d, Duration.of(d.key()));
+        }
+        // nothing stored or garbled: no filter
+        assertEquals(Duration.ANY, Duration.of((String) null));
+        assertEquals(Duration.ANY, Duration.of(""));
+        assertEquals(Duration.ANY, Duration.of("FORTNIGHT"));
+        assertEquals(Duration.ANY, Duration.of("90-45"));
+        assertEquals(Duration.ANY, Duration.of("99999999999-"));
+    }
+
+    @Test
+    public void everyPresetSitsOnSliderStopsAndTheLastStopIsOpen() {
+        assertEquals(Duration.UNBOUNDED, Duration.STOPS[Duration.STOPS.length - 1]);
+        for (Duration d : Duration.PRESETS) {
+            assertEquals(d.key(), d, Duration.ofStops(d.fromStop(), d.toStop()));
+        }
+        assertEquals(0, Duration.ANY.fromStop());
+        assertEquals(Duration.STOPS.length - 1, Duration.ANY.toStop());
+        // a range between stops widens to the stops around it
+        assertEquals(Duration.of(30, 60), Duration.ofStops(Duration.of(40, 50).fromStop(), Duration.of(40, 50).toStop()));
+    }
+
+    @Test
     public void onlySitesWhoseCardsCarryADurationCanFilterByIt() {
         assertFalse(ListingFilters.listsDuration(Provider.IZIBUK, Url.INDEX_IZIBUK));
         assertFalse(ListingFilters.listsDuration(Provider.OTRUB, Url.BEST_WEEK_OTRUB));
@@ -108,6 +160,20 @@ public class ListingFiltersTest {
         assertEquals(Url.SERVER_BAZA_KNIG + "/f/f.prodolzhitelnost=02:00:00/sort=news_read/order=desc/page/",
                 ListingFilters.withDuration(Provider.BAZA_KNIG, bounded, Duration.OVER_2H));
         assertEquals(ranking, ListingFilters.withDuration(Provider.BAZA_KNIG, bounded, Duration.ANY));
+    }
+
+    @Test
+    public void bazaKnigWidensACustomRangeToWholeHours() {
+        String ranking = Url.BEST_BAZA_KNIG;
+        // from rounds down (0 h is no bound), to rounds up to the end of the hour before it
+        assertEquals(Url.SERVER_BAZA_KNIG + "/f/t.prodolzhitelnost=01:59:59/sort=news_read/order=desc/page/",
+                ListingFilters.withDuration(Provider.BAZA_KNIG, ranking, Duration.of(45, 90)));
+        assertEquals(Url.SERVER_BAZA_KNIG + "/f/f.prodolzhitelnost=01:00:00/t.prodolzhitelnost=02:59:59/sort=news_read/order=desc/page/",
+                ListingFilters.withDuration(Provider.BAZA_KNIG, ranking, Duration.of(90, 180)));
+        assertEquals(Url.SERVER_BAZA_KNIG + "/f/f.prodolzhitelnost=10:00:00/t.prodolzhitelnost=29:59:59/sort=news_read/order=desc/page/",
+                ListingFilters.withDuration(Provider.BAZA_KNIG, ranking, Duration.of(600, 1800)));
+        assertEquals(Url.SERVER_BAZA_KNIG + "/f/f.prodolzhitelnost=20:00:00/sort=news_read/order=desc/page/",
+                ListingFilters.withDuration(Provider.BAZA_KNIG, ranking, Duration.of(1200, Duration.UNBOUNDED)));
     }
 
     @Test
@@ -222,6 +288,7 @@ public class ListingFiltersTest {
         assertTrue(bar.visible);
         assertTrue(bar.isFiltering());
         assertEquals(Period.WEEK, bar.period);
+        assertEquals(Arrays.asList(Period.DAY, Period.WEEK, Period.MONTH, Period.ALL), bar.periods);
         assertFalse(bar.end);
         assertTrue("more pages, nothing loading: offer to search further", bar.canSearchMore);
         ListingFilters.Bar end = ListingFilters.bar(true, Provider.KNIGAVUHE, Url.BEST_WEEK, Duration.UNDER_30M, Period.WEEK, 2, 30, true, false);

@@ -26,9 +26,8 @@ public interface BooksPresenter {
 
     void onActivityResult(@NonNull Intent intent);
 
+    /** The duration filter's chip or menu item: opens the range dialog. */
     void onDurationChipClick();
-
-    void onPeriodChipClick();
 
     void onDurationSelected(@NonNull ListingFilters.Duration duration);
 
