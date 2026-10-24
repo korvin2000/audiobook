@@ -264,8 +264,8 @@
 
 
     <!-- Compact top app bar, shared by the three themes: the title follows the 48dp navigation button with no
-         extra inset (was 72dp from the edge, now 52dp) and the action icons sit in 40dp buttons (were 48dp), so
-         four icons take the room three took. The 4dp side padding keeps the outer icons where they were. -->
+         extra inset (was 72dp from the edge, now 52dp) and the 24dp action icons sit in 32dp buttons (were 48dp),
+         8dp apart instead of 24dp, so four icons take less room than three did and the title keeps its width. -->
     <style name="Widget.App.Toolbar" parent="Widget.AppCompat.Toolbar">
         <item name="contentInsetStartWithNavigation">0dp</item>
         <item name="android:paddingLeft">4dp</item>
@@ -279,9 +279,12 @@
     </style>
 
     <style name="Widget.App.ActionButton" parent="Widget.AppCompat.ActionButton">
-        <item name="android:minWidth">40dp</item>
-        <item name="android:paddingLeft">8dp</item>
-        <item name="android:paddingRight">8dp</item>
+        <item name="android:minWidth">32dp</item>
+        <!-- start/end too: AppCompat's own 12dp paddingStart/End would win over left/right -->
+        <item name="android:paddingLeft">4dp</item>
+        <item name="android:paddingRight">4dp</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
     </style>
 
     <!-- The active-filter chip above a book listing: 28dp high, no 48dp touch inset. -->
