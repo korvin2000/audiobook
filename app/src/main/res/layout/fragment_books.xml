@@ -50,6 +50,7 @@
             android:layout_height="wrap_content"
             android:insetTop="0dp"
             android:insetBottom="0dp"
+            android:letterSpacing="0"
             android:minWidth="0dp"
             android:minHeight="32dp"
             android:paddingStart="@dimen/margin_small"

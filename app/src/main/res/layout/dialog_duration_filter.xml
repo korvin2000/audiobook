@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The duration filter: ready-made ranges in a dropdown over a two-thumb slider on a non-linear scale
      (ListingFilters.Duration.STOPS); a preset moves the thumbs, moved thumbs show the matching preset. The
-     slider's negative margins cancel its 16dp track inset, so the track lines up with the dropdown. -->
+     slider's negative margins cancel its track inset, so the track lines up with the dropdown; clipToPadding off
+     keeps its end thumbs whole where they reach into the side padding. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:clipToPadding="false"
     android:orientation="vertical"
     android:paddingStart="24dp"
     android:paddingTop="12dp"
