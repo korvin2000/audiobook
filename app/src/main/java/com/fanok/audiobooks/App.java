@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.offline.DownloadManager;
 import androidx.media3.exoplayer.scheduler.Requirements;
 import androidx.preference.PreferenceManager;
 
+import com.fanok.audiobooks.download.DownloadMonitor;
 import com.fanok.audiobooks.net.AppProxy;
 import com.fanok.audiobooks.net.MemoryCookieJar;
 import com.fanok.audiobooks.pojo.StorageUtil;
@@ -270,6 +271,9 @@ public class App extends Application {
         Consts.setSOURCE(this, source);
 
         getDownloadManager();
+        // before the download service can resume the manager: the monitor sees every run from its first event and
+        // takes over the resting notification an earlier process left
+        DownloadMonitor.get();
     }
 
 

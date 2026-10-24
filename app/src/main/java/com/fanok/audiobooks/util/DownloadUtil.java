@@ -189,12 +189,15 @@ public class DownloadUtil {
 
     // ---------------------------------------------------------------- identity
 
+    /** Thread-safe; one instance spares rebuilding its adapters for every download read. */
+    private static final Gson GSON = new Gson();
+
     /** The book a download belongs to, from its request data. */
     @Nullable
     public static BookPOJO bookOf(@NonNull DownloadRequest request) {
         if (request.data == null || request.data.length == 0) return null;
         try {
-            return new Gson().fromJson(new String(request.data, StandardCharsets.UTF_8), BookPOJO.class);
+            return GSON.fromJson(new String(request.data, StandardCharsets.UTF_8), BookPOJO.class);
         } catch (Exception e) {
             Log.w(TAG, "Unreadable download data of " + request.id, e);
             return null;

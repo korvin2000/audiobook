@@ -5,6 +5,8 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import com.arellomobile.mvp.InjectViewState;
 import com.arellomobile.mvp.MvpPresenter;
+import com.fanok.audiobooks.App;
+import com.fanok.audiobooks.Consts;
 import com.fanok.audiobooks.CookesExeption;
 import com.fanok.audiobooks.R;
 import com.fanok.audiobooks.interface_pacatge.book_content.Description;
@@ -85,15 +87,34 @@ public class BookDescriptionPresenter extends MvpPresenter<Description> implemen
         }
     }
 
+    /**
+     * Offline (no network at all) a failed load is no error to report: the saved description shows quietly, and a
+     * short offline hint tells what is missing when there is no description text (nothing saved, or only the
+     * history row). Online every failure keeps its message, with the saved description as a fallback.
+     */
     private void onDescriptionError(Throwable e) {
         Log.w(TAG, "description not loaded", e);
-        getViewState().showToast(errorMessage(e));
+        boolean offline = e instanceof IOException && Consts.isOffline(App.getInstance());
         DescriptionPOJO fallback = mBookPOJO.getDescriptionPOJO();
         mDisposables.add(mModelDescription.getSavedDescription()
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
-                .subscribe(this::showDescription, error -> showDescription(fallback),
-                        () -> showDescription(fallback)));
+                .subscribe(saved -> {
+                            if (!offline) {
+                                getViewState().showToast(errorMessage(e));
+                            } else if (saved.getDescription() == null || saved.getDescription().isEmpty()) {
+                                getViewState().showToast(R.string.offline_description);
+                            }
+                            showDescription(saved);
+                        },
+                        error -> {
+                            getViewState().showToast(errorMessage(e));
+                            showDescription(fallback);
+                        },
+                        () -> {
+                            getViewState().showToast(offline ? R.string.offline_description : errorMessage(e));
+                            showDescription(fallback);
+                        }));
     }
 
     private void showDescription(DescriptionPOJO descriptionPOJO) {

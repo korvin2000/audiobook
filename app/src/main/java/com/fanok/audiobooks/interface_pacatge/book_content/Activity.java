@@ -29,8 +29,9 @@ public interface Activity extends MvpView {
 
     void showProgres(boolean b);
 
+    /** {@code chaptersTotal}: chapters the book has, more than {@code data} when only downloaded ones are listed. */
     @StateStrategyType(AddToEndSingleStrategy.class)
-    void showData(ArrayList<AudioPOJO> data, String url);
+    void showData(ArrayList<AudioPOJO> data, String url, int chaptersTotal);
 
     void showTitle(@NonNull String name);
 

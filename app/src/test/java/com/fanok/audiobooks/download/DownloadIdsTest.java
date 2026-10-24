@@ -66,6 +66,19 @@ public class DownloadIdsTest {
     }
 
     @Test
+    public void theBookKeyIsReadBackFromV1IdsOnly() {
+        String book = "https://akniga.org/bulgakov-master";
+        assertEquals(DownloadIds.bookKey(BOOK), DownloadIds.bookKeyOfId(DownloadIds.chapterId(BOOK, 12)));
+        assertEquals("akniga.org/bulgakov-master",
+                DownloadIds.bookKeyOfId(DownloadIds.streamId(book, "https://cdn.x/stream/b/1/chapter/2/pl.m3u8")));
+        // a book path holding "/chapter/" itself: the id's own suffix is the ordinal at its end
+        assertEquals("x.org/chapter/5/book", DownloadIds.bookKeyOfId(DownloadIds.chapterId("https://x.org/chapter/5/book/", 3)));
+        assertNull(DownloadIds.bookKeyOfId(DownloadIds.legacyId("https://h/old.mp3")));
+        assertNull(DownloadIds.bookKeyOfId("v1/akniga.org/bulgakov-master/chapter/x"));
+        assertNull(DownloadIds.bookKeyOfId(null));
+    }
+
+    @Test
     public void aStreamKeepsItsIdWhenAnEarlierStreamIsDropped() {
         String book = "https://akniga.org/bulgakov-master";
         String a = "https://r1.akniga.club/b/1/a.m3u8?res=1";

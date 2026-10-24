@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.offline.DownloadCursor;
 import androidx.media3.exoplayer.offline.DownloadIndex;
 
 import com.fanok.audiobooks.download.DownloadIds;
+import com.fanok.audiobooks.download.DownloadMonitor;
+import com.fanok.audiobooks.download.DownloadStatus;
 import com.fanok.audiobooks.pojo.BookPOJO;
 import com.fanok.audiobooks.pojo.DownloadItem;
 import com.fanok.audiobooks.policy.ParentalControl;
@@ -129,6 +131,7 @@ public class ClearSavedModel {
         float partial = 0;
         List<Integer> exported = new ArrayList<>();
         List<Download> pending = new ArrayList<>();
+        Map<String, Download> parts = new LinkedHashMap<>(); // the book's transfers, one per id
         if (!rows.isEmpty()) {
             total = rows.size();
             List<DownloadIds.Entry> entries = DownloadUtil.entriesOf(g.bookUrl, rows);
@@ -138,6 +141,7 @@ public class ClearSavedModel {
                 if (copy) exported.add(row.ordinal >= 0 ? row.ordinal + 1 : i + 1);
                 boolean remote = DeletionPlanner.isRemote(row.urlAudio);
                 Download d = remote ? DownloadUtil.find(byId, entries.get(i), row.urlAudio) : null;
+                if (d != null) parts.put(d.request.id, d);
                 if (copy || !remote || (d != null && d.state == Download.STATE_COMPLETED)) {
                     completed++;
                     selected++;
@@ -148,6 +152,7 @@ public class ClearSavedModel {
             }
         } else {
             total = g.downloads.size();
+            parts.putAll(g.downloads);
             for (Download d : g.downloads.values()) {
                 selected++;
                 if (d.state == Download.STATE_COMPLETED) completed++;
@@ -184,11 +189,14 @@ public class ClearSavedModel {
         // a blocked book's cover is not handed to the Downloads screen (the placeholder shows instead)
         String cover = book != null && ParentalControl.isAllowed(mContext, book) ? book.getPhoto() : null;
         String source = DeletionPlanner.isImportedBook(g.bookUrl) ? "Локально" : DownloadStorageHelper.getSourceName(g.bookUrl);
+        List<DownloadStatus.Part> statusParts = new ArrayList<>(parts.size());
+        for (Download d : parts.values()) statusParts.add(DownloadMonitor.partOf(d));
         return new DownloadItem(DownloadIds.bookKey(g.bookUrl), g.bookUrl,
                 cover, book != null ? book.getName() : nameOf(rows),
 
                 book != null ? book.getAutor() : null, book != null ? book.getArtist() : null, source,
-                status, progress, completed, selected, total, new ArrayList<>(g.downloads.keySet()), exported);
+                status, progress, completed, selected, total, new ArrayList<>(g.downloads.keySet()), exported,
+                statusParts);
     }
 
     @Nullable

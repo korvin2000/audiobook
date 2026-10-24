@@ -8,7 +8,6 @@ import android.content.Intent;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.media3.common.C;
 import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.offline.Download;
@@ -18,6 +17,7 @@ import androidx.media3.exoplayer.offline.DownloadService;
 import androidx.media3.exoplayer.scheduler.PlatformScheduler;
 import androidx.media3.exoplayer.scheduler.Scheduler;
 import com.fanok.audiobooks.NotificationDownload;
+import com.fanok.audiobooks.download.DownloadMonitor;
 import com.fanok.audiobooks.model.AudioListDBModel;
 import com.fanok.audiobooks.model.BooksDBModel;
 import com.fanok.audiobooks.pojo.BookPOJO;
@@ -25,7 +25,9 @@ import com.fanok.audiobooks.room.BooksAudioEntity;
 import com.fanok.audiobooks.util.DownloadStorageHelper;
 import com.fanok.audiobooks.util.DownloadUtil;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -71,30 +73,37 @@ public class ExoDownloadService extends DownloadService {
         return new PlatformScheduler(this, JOB_ID);
     }
 
+    /**
+     * Called by Media3 every second on the main thread while downloads run or wait: the book of the running download
+     * (else of the first one in hand) with its status line, which also says why nothing moves (network, pause,
+     * failure). Downloads being deleted are no book to show; book keys and names come from the monitor's cache.
+     */
     @NotNull
     @Override
     protected Notification getForegroundNotification(@NotNull List<Download> downloads, int notMetRequirements) {
-        Download current = downloads.stream()
-                .filter(d -> d.state == Download.STATE_DOWNLOADING)
-                .findFirst()
-                .orElse(null);
-
-        int progress = 0;
-        if (current != null) {
-            if (current.getPercentDownloaded() != C.PERCENTAGE_UNSET) {
-                progress = Math.max(0, Math.min(100, Math.round(current.getPercentDownloaded())));
-            } else if (current.contentLength > 0) {
-                progress = (int) Math.round(100.0 * current.getBytesDownloaded() / (double) current.contentLength);
-                progress = Math.max(0, Math.min(100, progress));
+        DownloadMonitor monitor = DownloadMonitor.get();
+        Download current = null;
+        boolean removing = false;
+        Set<String> books = new HashSet<>();
+        for (Download d : downloads) {
+            if (d.state == Download.STATE_REMOVING) {
+                removing = true;
+                continue;
+            }
+            String key = monitor.bookKeyOf(d);
+            books.add(key.isEmpty() ? d.request.id : key);
+            if (current == null || (current.state != Download.STATE_DOWNLOADING && d.state == Download.STATE_DOWNLOADING)) {
+                current = d;
             }
         }
-
-        boolean isDownloading = current != null && current.state== Download.STATE_DOWNLOADING;
-        String id = null;
-        if (current != null) {
-            id = current.request.id;
+        if (current == null && removing) return NotificationDownload.removing(this);
+        String key = current != null ? monitor.bookKeyOf(current) : "";
+        String name = monitor.bookName(key);
+        if (name == null && current != null) {
+            BookPOJO book = DownloadUtil.bookOf(current.request); // a book added since the monitor last read the index
+            name = book != null ? book.getName() : null;
         }
-        return NotificationDownload.getNotification(this, id, progress, isDownloading);
+        return NotificationDownload.forStatus(this, key, name, monitor.statusOfBook(key), Math.max(0, books.size() - 1));
     }
 
     /** Tells this app's screens that downloads changed. */

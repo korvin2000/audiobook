@@ -78,7 +78,11 @@ public class BookSeriesPresenter extends MvpPresenter<Series> implements
                         mComentsPOJOS.addAll(series);
                     }, e -> {
                         Log.w(TAG, "series not loaded", e);
-                        getViewState().showToast(R.string.error_load_data);
+                        // offline there is nothing to report: the series is online-only content
+                        if (!(e instanceof java.io.IOException
+                                && com.fanok.audiobooks.Consts.isOffline(com.fanok.audiobooks.App.getInstance()))) {
+                            getViewState().showToast(R.string.error_load_data);
+                        }
                         finish();
                     }, this::finish);
         }

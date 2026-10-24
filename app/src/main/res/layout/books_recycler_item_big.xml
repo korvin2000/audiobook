@@ -36,10 +36,39 @@
                 custom:donut_finished_color="@color/colorAcentPopupWindow"
                 custom:donut_max="100"
                 custom:donut_progress="14"
-                custom:donut_show_text="true"
-                custom:donut_text="85%"
-                custom:donut_text_color="@color/colorAcentPopupWindow"
-                custom:donut_unfinished_color="@android:color/transparent" />
+                custom:donut_finished_stroke_width="5dp"
+                custom:donut_show_text="false"
+                custom:donut_unfinished_color="@android:color/transparent"
+                custom:donut_unfinished_stroke_width="5dp" />
+
+            <!-- the percent and its label, one block centred in the ring's hole; shown with the ring -->
+            <LinearLayout
+                android:id="@+id/listened"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerInParent="true"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <TextView
+                    android:id="@+id/listenedPercent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/colorAcentPopupWindow"
+                    android:textSize="18sp"
+                    tools:text="85%" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/listened_label"
+                    android:textColor="@color/colorAcentPopupWindow"
+                    android:textSize="10sp" />
+            </LinearLayout>
         </RelativeLayout>
 
         <LinearLayout

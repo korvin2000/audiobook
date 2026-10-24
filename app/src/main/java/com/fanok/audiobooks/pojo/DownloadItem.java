@@ -3,6 +3,8 @@ package com.fanok.audiobooks.pojo;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.fanok.audiobooks.download.DownloadStatus;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -28,11 +30,12 @@ public final class DownloadItem {
     private final int total;
     private final List<String> downloadIds;
     private final List<Integer> exportedChapters;
+    private final List<DownloadStatus.Part> parts;
 
     public DownloadItem(@NonNull String id, @NonNull String bookUrl, @Nullable String fileIcon, @Nullable String bookName,
                         @Nullable String author, @Nullable String reader, @Nullable String source, int status,
                         int progress, int completed, int selected, int total, @NonNull List<String> downloadIds,
-                        @NonNull List<Integer> exportedChapters) {
+                        @NonNull List<Integer> exportedChapters, @NonNull List<DownloadStatus.Part> parts) {
         this.id = id;
         this.bookUrl = bookUrl;
         this.fileIcon = fileIcon;
@@ -47,6 +50,7 @@ public final class DownloadItem {
         this.total = total;
         this.downloadIds = Collections.unmodifiableList(new ArrayList<>(downloadIds));
         this.exportedChapters = Collections.unmodifiableList(new ArrayList<>(exportedChapters));
+        this.parts = Collections.unmodifiableList(new ArrayList<>(parts));
     }
 
     @NonNull
@@ -69,6 +73,9 @@ public final class DownloadItem {
     /** 1-based numbers of the chapters that have an exported copy in the download folder. */
     @NonNull
     public List<Integer> getExportedChapters() { return exportedChapters; }
+    /** The book's transfers as the index had them, the input of {@code DownloadMonitor.statusOf}. */
+    @NonNull
+    public List<DownloadStatus.Part> getParts() { return parts; }
 
     /** Every listed chapter has a completed download or an exported copy. */
     public boolean isComplete() {
@@ -80,6 +87,7 @@ public final class DownloadItem {
                 && total == o.total && Objects.equals(bookUrl, o.bookUrl) && Objects.equals(fileIcon, o.fileIcon)
                 && Objects.equals(bookName, o.bookName) && Objects.equals(author, o.author)
                 && Objects.equals(reader, o.reader) && Objects.equals(source, o.source)
-                && downloadIds.equals(o.downloadIds) && exportedChapters.equals(o.exportedChapters);
+                && downloadIds.equals(o.downloadIds) && exportedChapters.equals(o.exportedChapters)
+                && parts.equals(o.parts);
     }
 }

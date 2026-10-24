@@ -65,6 +65,11 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
 
         private final DonutProgress mDonutProgress;
 
+        /** The percent with its "listened" label inside the ring; null where the ring draws the percent (TV). */
+        private final View mListened;
+
+        private final TextView mListenedPercent;
+
         private final TextView mGenre;
 
         private final ImageView mImageView;
@@ -101,6 +106,8 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
             LinearLayout linearLayout = itemView.findViewById(R.id.contentConteiner);
             mSource = itemView.findViewById(R.id.source);
             mDonutProgress = itemView.findViewById(R.id.donutProgress);
+            mListened = itemView.findViewById(R.id.listened);
+            mListenedPercent = itemView.findViewById(R.id.listenedPercent);
             mPreferences = mArtist.getContext().getSharedPreferences(PARENTAL_CONTROL_PREFERENCES,
                     MODE_PRIVATE);
             linearLayout.setOnClickListener(view -> {
@@ -244,6 +251,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
                 } else {
                     mDonutProgress.setProgress(pct);
                     mDonutProgress.setText(pct + "%");
+                    if (mListenedPercent != null) mListenedPercent.setText(pct + "%");
                     setVisible(true);
                 }
             } else {
@@ -270,6 +278,7 @@ public class BooksListAddapter extends RecyclerView.Adapter<BooksListAddapter.My
         }
 
         private void setVisible(boolean b) {
+            if (mListened != null) mListened.setVisibility(b ? View.VISIBLE : View.GONE);
             if (b) {
                 mImageView.setColorFilter(
                         ContextCompat.getColor(mImageView.getContext(), R.color.imageTint));
